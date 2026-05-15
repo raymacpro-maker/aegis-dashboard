@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, Share2, Map as MapIcon, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Building2 } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, Share2, Map as MapIcon, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Building2, RadioTower } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import SearchBar from '@/components/SearchBar';
@@ -74,7 +74,7 @@ export default function Dashboard() {
   const [showIntel, setShowIntel] = useState(true);
   const [showWarSim, setShowWarSim] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'recon'|'company'|null>(null);
+  const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'recon'|'company'|'war_sim'|null>(null);
   const [mapProjection, setMapProjection] = useState<'globe'|'mercator'>('globe');
   const [mapStyle, setMapStyle] = useState<'dark'|'satellite'>('dark');
 
@@ -576,11 +576,12 @@ export default function Dashboard() {
                 { id: 'recon' as const, icon: Radar, label: 'RECON' },
                 { id: 'company' as const, icon: Building2, label: 'INTEL DB' },
                 { id: 'search' as const, icon: Search, label: 'SEARCH' },
+                { id: 'war_sim' as const, icon: RadioTower, label: 'DEFCON' },
               ].map(tab => (
                 <button key={tab.id} onClick={() => setMobilePanel(mobilePanel === tab.id ? null : tab.id)}
                   className={`mobile-nav-btn ${mobilePanel === tab.id ? 'active' : ''}`}>
-                  <tab.icon className={`w-4 h-4 ${tab.id === 'recon' ? 'text-[var(--cyan-primary)]' : ''}`} />
-                  <span className={tab.id === 'recon' ? 'text-[var(--cyan-primary)]' : ''}>{tab.label}</span>
+                  <tab.icon className={`w-4 h-4 ${tab.id === 'recon' ? 'text-[var(--cyan-primary)]' : tab.id === 'war_sim' ? 'text-red-500' : ''} ${tab.id === 'war_sim' && showWarSim ? 'animate-pulse' : ''}`} />
+                  <span className={tab.id === 'recon' ? 'text-[var(--cyan-primary)]' : tab.id === 'war_sim' ? 'text-red-500 font-bold tracking-widest' : ''}>{tab.label}</span>
                 </button>
               ))}
             </div>
@@ -599,7 +600,7 @@ export default function Dashboard() {
                 <div className="px-3 pb-3">
                   <div className="flex items-center justify-between mb-2">
                     <span className="hud-text text-[9px] text-[var(--text-primary)]">
-                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'recon' ? 'OSIRIS RECON' : mobilePanel === 'company' ? 'COMPANY INTEL' : 'SEARCH'}
+                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'recon' ? 'OSIRIS RECON' : mobilePanel === 'company' ? 'COMPANY INTEL' : mobilePanel === 'war_sim' ? 'WAR SIMULATOR' : 'SEARCH'}
                     </span>
                     <button onClick={() => setMobilePanel(null)} className="text-[var(--text-muted)] p-1"><X className="w-4 h-4" /></button>
                   </div>
@@ -636,6 +637,22 @@ export default function Dashboard() {
                   {mobilePanel === 'company' && (
                     <div className="space-y-2">
                       <CompanyIntel isMobile={true} />
+                    </div>
+                  )}
+                  {mobilePanel === 'war_sim' && (
+                    <div className="space-y-2 flex flex-col items-center">
+                      {!showWarSim ? (
+                        <button onClick={() => { setShowWarSim(true); setMobilePanel(null); }} className="w-full flex items-center justify-center gap-2 px-4 py-4 mt-4 bg-red-500/20 border border-red-500 text-red-400 font-mono tracking-widest font-bold rounded-lg uppercase shadow-[0_0_20px_rgba(255,0,0,0.4)]">
+                          <RadioTower className="w-5 h-5 animate-pulse" /> ENGAGE WAR SIMULATOR
+                        </button>
+                      ) : (
+                        <button onClick={() => { setShowWarSim(false); setMobilePanel(null); }} className="w-full flex items-center justify-center gap-2 px-4 py-4 mt-4 bg-red-900/50 border border-red-900 text-red-400 font-mono tracking-widest font-bold rounded-lg uppercase">
+                          DISENGAGE SIMULATOR
+                        </button>
+                      )}
+                      <p className="text-[10px] text-[var(--text-muted)] font-mono text-center mt-2 px-4">
+                        Engaging the simulator activates the global DEFCON state and enables real-time predictive trajectory calculations on the map.
+                      </p>
                     </div>
                   )}
                 </div>
