@@ -1,7 +1,8 @@
 {
-  "name": "osiris",
-  "version": "0.1.0",
+  "name": "aegis-dashboard",
+  "version": "0.1.0-aegis.1",
   "private": true,
+  "description": "Aegis — agentic fleet operations platform. Forked from OSIRIS (MIT). See AEGIS.md for attribution + divergence log.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
