@@ -174,6 +174,18 @@ export default function AegisDashboard() {
         <main className="flex-1 overflow-y-auto p-6">
           {sel ? (
             <div>
+              {/* Fleet Map — hero, top of detail */}
+              <div className="mb-6 p-4 rounded border border-slate-800 bg-slate-900/50">
+                <h3 className="text-xs uppercase tracking-widest text-slate-500 mb-3">Fleet Map</h3>
+                <div className="aspect-[21/9] bg-gradient-to-br from-slate-800 to-slate-900 rounded relative overflow-hidden">
+                  <FleetMap
+                    trucks={trucks.map(t => ({ id: t.id, lat: t.location.lat, lng: t.location.lng, status: t.status, address: t.location.address }))}
+                    selectedTruck={sel.id}
+                    onSelect={(id) => setSelectedTruck(id)}
+                  />
+                </div>
+              </div>
+
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-3xl font-bold text-amber-400 tracking-wider">{sel.id}</h2>
@@ -186,8 +198,8 @@ export default function AegisDashboard() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 <TelemetryCard icon={<Clock className="w-5 h-5" />} label="HOS Drive Left" value={`${sel.hos.hoursRemaining.drive.toFixed(1)}h`} sub={`${sel.hos.hoursDriven.toFixed(1)}h driven`} color={sel.hos.hoursRemaining.drive < 2 ? 'red' : sel.hos.hoursRemaining.drive < 4 ? 'amber' : 'emerald'} />
                 <TelemetryCard icon={<Clock className="w-5 h-5" />} label="HOS Shift Left" value={`${sel.hos.hoursRemaining.shift.toFixed(1)}h`} sub={`${sel.hos.hoursOnDuty.toFixed(1)}h on duty`} color={sel.hos.hoursRemaining.shift < 2 ? 'red' : sel.hos.hoursRemaining.shift < 4 ? 'amber' : 'emerald'} />
-                <TelemetryCard icon={<Fuel className="w-5 h-5" />} label="Fuel" value={`${(sel.fuel.levelPct * 100).toFixed(0)}%`} sub={`${sel.fuel.estimatedRangeMi} mi`} color={sel.fuel.levelPct < 0.25 ? 'red' : 'emerald'} />
-                <TelemetryCard icon={<Activity className="w-5 h-5" />} label="Speed" value={`${sel.location.speedMph} mph`} sub={`${sel.fuel.mpgRecent.toFixed(1)} mpg`} color="blue" />
+                <TelemetryCard icon={<Fuel className="w-5 h-5" />} label="Fuel" value={sel.status === 'offline' ? '—' : `${(sel.fuel.levelPct * 100).toFixed(0)}%`} sub={sel.status === 'offline' ? 'no telemetry' : `${sel.fuel.estimatedRangeMi} mi range`} color={sel.fuel.levelPct < 0.25 ? 'red' : 'emerald'} />
+                <TelemetryCard icon={<Activity className="w-5 h-5" />} label="Speed" value={sel.status === 'offline' || sel.status === 'maintenance' ? 'Parked' : `${sel.location.speedMph} mph`} sub={sel.status === 'maintenance' ? 'in service bay' : `${sel.fuel.mpgRecent.toFixed(1)} mpg recent`} color="blue" />
               </div>
 
               {/* Faults */}
@@ -234,18 +246,6 @@ export default function AegisDashboard() {
                   </div>
                 </div>
               </div>
-
-              {/* Map */}
-              <div className="mb-6 p-4 rounded border border-slate-800 bg-slate-900/50">
-                <h3 className="text-xs uppercase tracking-widest text-slate-500 mb-3">Location</h3>
-                <div className="aspect-video bg-gradient-to-br from-slate-800 to-slate-900 rounded relative overflow-hidden">
-                  <FleetMap
-                    trucks={trucks.map(t => ({ id: t.id, lat: t.location.lat, lng: t.location.lng, status: t.status, address: t.location.address }))}
-                    selectedTruck={sel.id}
-                    onSelect={(id) => setSelectedTruck(id)}
-                  />
-                </div>
-              </div>
             </div>
           ) : (
             <div className="text-center py-20 text-slate-500">Select a truck to view details</div>
@@ -256,9 +256,10 @@ export default function AegisDashboard() {
       {/* Chat FAB */}
       <button
         onClick={() => setChatOpen(!chatOpen)}
-        className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-amber-500 text-slate-900 flex items-center justify-center shadow-lg shadow-amber-500/30 hover:scale-105 transition"
+        className="fixed bottom-6 right-6 px-4 h-14 rounded-full bg-amber-500 text-slate-900 flex items-center gap-2 shadow-lg shadow-amber-500/30 hover:scale-105 transition font-bold text-sm"
       >
-        {chatOpen ? <X className="w-6 h-6" /> : <MessageSquare className="w-6 h-6" />}
+        <MessageSquare className="w-5 h-5" />
+        Ask Aegis
       </button>
 
       {/* Chat panel */}
