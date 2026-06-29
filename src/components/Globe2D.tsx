@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import AegisLogo from '@/components/AegisLogo';
-import { ArrowLeft, Truck, Flame, CloudRain, Search, X, Plane, Ship, Home } from 'lucide-react';
-import type { TruckPin, STATUS_COLORS } from './Globe2D.types';
+import { geoEquirectangular, geoPath } from 'd3-geo';
+import { feature } from 'topojson-client';
+import type { FeatureCollection, Geometry } from 'geojson';
+import { Truck, Flame, CloudRain, Search, X, Plane, Ship } from 'lucide-react';
+import type { TruckPin } from './Globe2D.types';
 
 const STATUS = {
   moving: '#10b981',
@@ -12,25 +14,6 @@ const STATUS = {
   offline: '#64748b',
 } as const;
 
-// Equirectangular projection: lon [-180,180] → x [0,W], lat [-90,90] → y [0,H]
-function project(lng: number, lat: number, W: number, H: number) {
-  const x = ((lng + 180) / 360) * W;
-  const y = ((90 - lat) / 180) * H;
-  return { x, y };
-}
-
-const COUNTRY_PATHS = [
-  // Simplified continent silhouettes (approximate, used for visual context only)
-  // All coordinates are in [lat, lng] pairs.
-  'M158,82 L220,80 L245,72 L268,75 L290,82 L300,95 L295,110 L278,118 L255,118 L240,128 L218,138 L195,142 L170,135 L150,118 L142,100 Z', // North America
-  'M210,150 L240,148 L260,160 L270,180 L268,205 L260,225 L250,238 L235,245 L218,242 L208,228 L200,210 L195,190 L200,170 Z', // South America
-  'M440,90 L470,88 L490,100 L495,118 L488,135 L470,140 L450,138 L440,128 L432,112 Z', // Europe
-  'M455,150 L490,148 L520,160 L535,180 L530,205 L515,225 L490,232 L465,228 L450,210 L448,185 L452,165 Z', // Africa
-  'M540,90 L600,82 L660,85 L720,90 L740,108 L745,128 L730,140 L700,150 L670,158 L640,158 L620,165 L605,160 L588,148 L572,138 L555,128 L545,118 L538,105 Z', // Asia
-  'M620,210 L680,200 L730,210 L730,235 L700,250 L640,245 L615,232 Z', // Australia
-];
-// We treat these as decorative land blobs on a 800x500 SVG canvas
-
 const sampleFires = [
   { lng: -121.5, lat: 38.6, name: 'Dixie aftermath' },
   { lng: -119.0, lat: 34.0, name: 'SoCal brushfire' },
@@ -38,12 +21,36 @@ const sampleFires = [
   { lng: -122.0, lat: 47.6, name: 'WA wildfire' },
 ];
 
+const sampleMaritime = [
+  { lat: 33.74, lng: -118.27, name: 'Port of LA' },
+  { lat: 33.77, lng: -118.22, name: 'Port of Long Beach' },
+  { lat: 29.73, lng: -95.30, name: 'Port of Houston' },
+  { lat: 40.66, lng: -74.05, name: 'Port NY/NJ' },
+  { lat: 32.78, lng: -79.93, name: 'Port of Charleston' },
+];
+
+const sampleFlights = [
+  { lat: 41.97, lng: -87.90, callsign: 'FDX1421', alt: 37000 },
+  { lat: 33.94, lng: -118.40, callsign: 'UPS952', alt: 39000 },
+  { lat: 32.90, lng: -97.04, callsign: 'FDX502', alt: 35000 },
+  { lat: 40.64, lng: -73.78, callsign: 'FDX88', alt: 41000 },
+];
+
+const sampleRiots = [
+  { lat: 38.91, lng: -77.04, city: 'DC', intensity: 'low' as const },
+  { lat: 34.05, lng: -118.24, city: 'LA', intensity: 'med' as const },
+];
+
+type WorldFeature = FeatureCollection<Geometry, { name: string }>;
+
 export default function Globe2D({ initialTruck }: { initialTruck?: string }) {
   const [fleet, setFleet] = useState<TruckPin[]>([]);
   const [selected, setSelected] = useState<TruckPin | null>(null);
   const [search, setSearch] = useState('');
   const [w, setW] = useState(900);
-  const [h, setH] = useState(540);
+  const [h, setH] = useState(500);
+  const [world, setWorld] = useState<WorldFeature | null>(null);
+  const [cams, setCams] = useState<{ lng: number; lat: number; format: string }[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [layers, setLayers] = useState({
@@ -56,7 +63,6 @@ export default function Globe2D({ initialTruck }: { initialTruck?: string }) {
     riots: false,
   });
 
-  // Track container size
   useEffect(() => {
     const ro = new ResizeObserver(() => {
       const el = containerRef.current;
@@ -68,7 +74,23 @@ export default function Globe2D({ initialTruck }: { initialTruck?: string }) {
     return () => ro.disconnect();
   }, []);
 
-  // Fetch fleet
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/data/world-110m.json');
+        const topo = await r.json();
+        const geo = feature(topo, topo.objects.countries) as WorldFeature;
+        if (!cancelled) setWorld(geo);
+      } catch (e) {
+        console.error('Globe2D: world atlas failed', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const r = await fetch('/api/telematics');
@@ -83,20 +105,45 @@ export default function Globe2D({ initialTruck }: { initialTruck?: string }) {
         address: t.location.address,
       }));
       setFleet(pins);
-      if (initialTruck) {
+      if (initialTruck && !selected) {
         const found = pins.find((p) => p.id === initialTruck);
         if (found) setSelected(found);
       }
     } catch (e) {
-      console.error('Globe2D: fleet fetch failed', e);
+      console.error('Globe2D: fleet failed', e);
     }
-  }, [initialTruck]);
+  }, [initialTruck, selected]);
 
   useEffect(() => {
     refresh();
     const iv = setInterval(refresh, 10000);
     return () => clearInterval(iv);
   }, [refresh]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/cameras?limit=300');
+        const data = await r.json();
+        if (!cancelled) setCams(data.cameras ?? []);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const projection = useMemo(() => geoEquirectangular().fitSize([w, h], { type: 'Sphere' } as any), [w, h]);
+  const pathGen = useMemo(() => geoPath(projection as any), [projection]);
+
+  const project = useCallback(
+    (lng: number, lat: number) => {
+      const p = projection([lng, lat]);
+      return p ?? [0, 0];
+    },
+    [projection]
+  );
 
   const stats = useMemo(
     () => ({
@@ -128,87 +175,162 @@ export default function Globe2D({ initialTruck }: { initialTruck?: string }) {
     }
   };
 
+  // Per-truck jitter offsets so clusters don't overlap
+  const clusterKeys = useMemo(() => {
+    const seen = new Map<string, number>();
+    const offsets: Record<string, { dx: number; dy: number }> = {};
+    for (const t of fleet) {
+      const p = project(t.lng, t.lat);
+      const key = `${Math.round(p[0] / 60)},${Math.round(p[1] / 60)}`;
+      const count = seen.get(key) ?? 0;
+      seen.set(key, count + 1);
+      const angle = count * 1.5;
+      const radius = count * 18;
+      offsets[t.id] = { dx: Math.cos(angle) * radius, dy: Math.sin(angle) * radius };
+    }
+    return offsets;
+  }, [fleet, project]);
+
   return (
     <div ref={containerRef} className="absolute inset-0 overflow-hidden bg-[#04040A]">
-      <svg
-        viewBox={`0 0 ${w} ${h}`}
-        width={w}
-        height={h}
-        preserveAspectRatio="none"
-        className="absolute inset-0"
-      >
+      <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} preserveAspectRatio="none" className="absolute inset-0">
         <defs>
           <radialGradient id="starfield" cx="50%" cy="50%" r="80%">
-            <stop offset="0%" stopColor="rgb(20, 24, 50)" />
-            <stop offset="100%" stopColor="rgb(2, 2, 8)" />
-          </radialGradient>
-          <radialGradient id="halo" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="rgba(251,191,36,0.04)" />
-            <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+            <stop offset="0%" stopColor="rgb(8, 10, 24)" />
+            <stop offset="60%" stopColor="rgb(2, 3, 10)" />
+            <stop offset="100%" stopColor="rgb(0, 0, 0)" />
           </radialGradient>
           <pattern id="grid" width="40" height="30" patternUnits="userSpaceOnUse">
-            <path d="M 40 0 L 0 0 0 30" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
+            <path d="M 40 0 L 0 0 0 30" fill="none" stroke="rgba(251,191,36,0.04)" strokeWidth="1" />
           </pattern>
         </defs>
 
         <rect width={w} height={h} fill="url(#starfield)" />
         <rect width={w} height={h} fill="url(#grid)" />
-        <rect width={w} height={h} fill="url(#halo)" />
 
-        {/* Decorative landmasses (stylized blobs — illustrative only) */}
-        <g fill="rgba(212,175,55,0.05)" stroke="rgba(212,175,55,0.15)" strokeWidth="1">
-          {COUNTRY_PATHS.map((p, i) => (
-            <path key={i} d={p} transform={`scale(${w / 800}, ${h / 500})`} />
-          ))}
-        </g>
+        {world && pathGen && (
+          <path
+            d={pathGen(world as any) || ''}
+            fill="rgba(212,175,55,0.10)"
+            stroke="rgba(212,175,55,0.55)"
+            strokeWidth="0.8"
+            strokeLinejoin="round"
+          />
+        )}
 
-        {/* Fires */}
+        {(() => {
+          const eq = pathGen({ type: 'LineString', coordinates: [[-180, 0], [180, 0]] } as any);
+          return eq ? <path d={eq} fill="none" stroke="rgba(251,191,36,0.15)" strokeWidth="1" strokeDasharray="4,6" /> : null;
+        })()}
+
+        {/* Cameras — high-vis */}
+        {layers.cameras &&
+          cams.map((c, i) => {
+            const p = project(c.lng, c.lat);
+            return (
+              <circle
+                key={i}
+                cx={p[0]}
+                cy={p[1]}
+                r={2.2}
+                fill={c.format === 'M3U8' ? '#00E5FF' : '#34D399'}
+                opacity="0.85"
+              />
+            );
+          })}
+
         {layers.fires &&
           sampleFires.map((f, i) => {
-            const p = project(f.lng, f.lat, w, h);
+            const p = project(f.lng, f.lat);
             return (
               <g key={i}>
-                <circle cx={p.x} cy={p.y} r="9" fill="rgba(255,107,53,0.15)" />
-                <circle cx={p.x} cy={p.y} r="5" fill="#FF6B35" opacity="0.9" />
-                <text x={p.x + 9} y={p.y + 4} fontSize="9" fill="#FF6B35" fillOpacity="0.6">
+                <circle cx={p[0]} cy={p[1]} r="14" fill="rgba(255,107,53,0.20)" />
+                <circle cx={p[0]} cy={p[1]} r="9" fill="rgba(255,107,53,0.4)" />
+                <circle cx={p[0]} cy={p[1]} r="6" fill="#FF6B35" opacity="1" stroke="#fff" strokeWidth="1">
+                  <animate attributeName="r" values="5;9;5" dur="3s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="1;0.4;1" dur="3s" repeatCount="indefinite" />
+                </circle>
+                <text
+                  x={p[0] + 12}
+                  y={p[1] + 4}
+                  fontSize="10"
+                  fill="#FF6B35"
+                  fontWeight="bold"
+                  style={{ paintOrder: 'stroke', stroke: '#04040A', strokeWidth: 3 }}
+                >
                   {f.name}
                 </text>
               </g>
             );
           })}
 
-        {/* Fleet pins — jittered so clusters are visible */}
-        {(() => {
-          const seen = new Map<string, number>();
-          return layers.fleet && fleet.map((t) => {
-            const p = project(t.lng, t.lat, w, h);
+        {layers.maritime &&
+          sampleMaritime.map((p, i) => {
+            const q = project(p.lng, p.lat);
+            return (
+              <g key={i}>
+                <rect x={q[0] - 5} y={q[1] - 5} width="10" height="10" fill="#a78bfa" opacity="0.7" transform={`rotate(45 ${q[0]} ${q[1]})`} />
+                <text x={q[0] + 9} y={q[1] + 4} fontSize="9" fill="#a78bfa" fillOpacity="0.7">
+                  {p.name}
+                </text>
+              </g>
+            );
+          })}
+
+        {layers.flights &&
+          sampleFlights.map((f, i) => {
+            const p = project(f.lng, f.lat);
+            return (
+              <g key={i}>
+                <circle cx={p[0]} cy={p[1]} r="4" fill="#3b82f6" opacity="0.8" />
+                <line x1={p[0] - 7} y1={p[1]} x2={p[0] + 7} y2={p[1]} stroke="#3b82f6" strokeWidth="1" />
+                <text x={p[0] + 9} y={p[1] + 4} fontSize="9" fill="#3b82f6" fillOpacity="0.7">
+                  {f.callsign} FL{f.alt / 100}
+                </text>
+              </g>
+            );
+          })}
+
+        {layers.riots &&
+          sampleRiots.map((r, i) => {
+            const q = project(r.lng, r.lat);
+            const color = r.intensity === 'high' ? '#FF3D3D' : r.intensity === 'med' ? '#FF6B35' : '#FF9500';
+            return (
+              <g key={i}>
+                <circle cx={q[0]} cy={q[1]} r="10" fill={color} opacity="0.4">
+                  <animate attributeName="r" values="10;18;10" dur="2.5s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.6;0;0.6" dur="2.5s" repeatCount="indefinite" />
+                </circle>
+                <circle cx={q[0]} cy={q[1]} r="3" fill={color} />
+              </g>
+            );
+          })}
+
+        {layers.fleet &&
+          fleet.map((t) => {
+            const p = project(t.lng, t.lat);
             const color = STATUS[t.status];
             const isSel = selected?.id === t.id;
-            const key = `${Math.round(p.x / 30)},${Math.round(p.y / 30)}`;
-            const count = seen.get(key) ?? 0;
-            seen.set(key, count + 1);
-            const angle = count * 1.4;
-            const radius = count * 6;
-            const x = p.x + Math.cos(angle) * radius;
-            const y = p.y + Math.sin(angle) * radius;
+            const off = clusterKeys[t.id] ?? { dx: 0, dy: 0 };
+            const x = p[0] + off.dx;
+            const y = p[1] + off.dy;
             return (
-              <g
-                key={t.id}
-                style={{ cursor: 'pointer' }}
-                onClick={() => setSelected(t)}
-              >
+              <g key={t.id} style={{ cursor: 'pointer' }} onClick={() => setSelected(t)}>
+                {off.dx !== 0 || off.dy !== 0 ? (
+                  <line x1={p[0]} y1={p[1]} x2={x} y2={y} stroke={color} strokeOpacity="0.5" strokeWidth="0.8" />
+                ) : null}
                 {isSel && (
-                  <circle cx={x} cy={y} r="18" fill="none" stroke="#fbbf24" strokeWidth="1.5" opacity="0.7">
-                    <animate attributeName="r" values="14;26;14" dur="2s" repeatCount="indefinite" />
+                  <circle cx={x} cy={y} r="20" fill="none" stroke="#fbbf24" strokeWidth="2" opacity="0.7">
+                    <animate attributeName="r" values="14;28;14" dur="2s" repeatCount="indefinite" />
                     <animate attributeName="opacity" values="0.9;0;0.9" dur="2s" repeatCount="indefinite" />
                   </circle>
                 )}
-                <circle cx={x} cy={y} r="14" fill={color} fillOpacity="0.18" />
-                <circle cx={x} cy={y} r="6" fill={color} stroke="#fff" strokeWidth="1.2" />
+                <circle cx={x} cy={y} r="14" fill={color} fillOpacity="0.22" />
+                <circle cx={x} cy={y} r="6" fill={color} stroke="#fff" strokeWidth="1.5" />
                 <text
                   x={x}
-                  y={y - 11}
-                  fontSize="11"
+                  y={y - 12}
+                  fontSize="12"
                   fontWeight="bold"
                   textAnchor="middle"
                   fill="#fbbf24"
@@ -218,10 +340,11 @@ export default function Globe2D({ initialTruck }: { initialTruck?: string }) {
                 </text>
                 {t.faultCount && t.faultCount > 0 ? (
                   <text
-                    x={x + 8}
+                    x={x + 11}
                     y={y + 4}
                     fontSize="9"
                     fill="#FF3D3D"
+                    fontWeight="bold"
                     style={{ paintOrder: 'stroke', stroke: '#04040A', strokeWidth: 2 }}
                   >
                     ⚠ {t.faultCount}
@@ -229,29 +352,16 @@ export default function Globe2D({ initialTruck }: { initialTruck?: string }) {
                 ) : null}
               </g>
             );
-          });
-        })()}
-
-        {/* Equator + meridians for orientation */}
-        <g stroke="rgba(251,191,36,0.04)" strokeWidth="1" strokeDasharray="3,5">
-          <line x1="0" y1={h / 2} x2={w} y2={h / 2} />
-          <line x1={w / 4} y1="0" x2={w / 4} y2={h} />
-          <line x1={(w * 3) / 4} y1="0" x2={(w * 3) / 4} y2={h} />
-        </g>
-
-        {/* Camera dots (sampled from /api/cameras) */}
-        {layers.cameras && <CameraDotsLayer w={w} h={h} />}
+          })}
       </svg>
 
-      {/* Layer panel + stats overlay at top-left (CSS-positioned) */}
-      <div className="absolute top-4 left-4 w-72 bg-[#0a0e1a]/85 border border-amber-500/20 rounded-lg p-4 backdrop-blur-md z-10 max-h-[80vh] overflow-y-auto">
+      <div className="absolute top-4 left-4 w-72 bg-[#0a0e1a]/92 border border-amber-500/30 rounded-lg p-4 backdrop-blur-md z-10 max-h-[80vh] overflow-y-auto">
         <div className="flex items-center gap-2 mb-3">
           <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
           <h3 className="text-[10px] uppercase tracking-[0.25em] text-amber-400 font-bold">Aegis · Intel Globe</h3>
         </div>
         <div className="text-[10px] text-slate-500 leading-relaxed mb-3">
-          Live fleet pins on a global operations view. Toggle layers to overlay
-          intel sources. Click a pin to inspect.
+          Live fleet + logistics intel. Toggle layers. Click a pin to inspect.
         </div>
 
         <div className="grid grid-cols-4 gap-1.5 mb-4 text-center">
@@ -329,9 +439,8 @@ export default function Globe2D({ initialTruck }: { initialTruck?: string }) {
         </div>
       </div>
 
-      {/* Selected truck detail (bottom-left or top-right) */}
       {selected && (
-        <div className="absolute bottom-4 left-4 w-80 bg-[#0a0e1a]/90 border border-amber-500/30 rounded-lg p-4 backdrop-blur-md z-10">
+        <div className="absolute bottom-4 left-4 w-80 bg-[#0a0e1a]/92 border border-amber-500/30 rounded-lg p-4 backdrop-blur-md z-10">
           <div className="flex items-center justify-between mb-2">
             <div className="text-[10px] uppercase tracking-[0.25em] text-slate-500 font-bold">
               {selected.id === 'search' ? 'Search result' : 'Truck'}
@@ -360,19 +469,8 @@ export default function Globe2D({ initialTruck }: { initialTruck?: string }) {
         </div>
       )}
 
-      {/* Bottom-right attribution */}
       <div className="absolute bottom-2 right-2 text-[9px] text-slate-600 bg-[#0a0e1a]/70 px-2 py-1 rounded border border-slate-800/60 z-10">
-        Aegis Intel Globe · fleet pins on global layer
-      </div>
-
-      {/* Bottom-right "back to dashboard" */}
-      <div className="absolute bottom-4 right-4 z-10">
-        <a
-          href="/dashboard"
-          className="flex items-center gap-2 px-3 py-2 rounded bg-gradient-to-r from-amber-500 to-amber-600 text-slate-900 text-xs font-bold shadow-lg shadow-amber-500/30 hover:from-amber-400 hover:to-amber-500 transition"
-        >
-          <Home className="w-3.5 h-3.5" /> Back to Command Center
-        </a>
+        Aegis Intel Globe · d3-geo · Natural Earth via world-atlas (CC0)
       </div>
     </div>
   );
@@ -386,42 +484,5 @@ function SmallStat({ label, n, color }: { label: string; n: number; color: strin
         {n}
       </div>
     </div>
-  );
-}
-
-// CameraDotsLayer: fetches and renders up to 200 random cameras as small dots
-function CameraDotsLayer({ w, h }: { w: number; h: number }) {
-  const [cams, setCams] = useState<{ lng: number; lat: number; format: string }[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch('/api/cameras?limit=200');
-        const data = await r.json();
-        if (!cancelled) setCams(data.cameras ?? []);
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return (
-    <g>
-      {cams.map((c, i) => {
-        const p = project(c.lng, c.lat, w, h);
-        return (
-          <circle
-            key={i}
-            cx={p.x}
-            cy={p.y}
-            r={1.5}
-            fill={c.format === 'M3U8' ? '#00E5FF' : '#10b981'}
-            opacity="0.6"
-          />
-        );
-      })}
-    </g>
   );
 }
