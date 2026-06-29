@@ -14,12 +14,22 @@ import {
   X,
   Send,
   Shield,
+  ShieldCheck,
+  ShieldAlert,
+  Eye,
+  EyeOff,
   Loader2,
   Globe2,
   Sparkles,
   ArrowUpRight,
+  Lock,
+  Info,
+  Video,
 } from 'lucide-react';
 import AegisLogo from '@/components/AegisLogo';
+import HighwayCCTV from '@/components/HighwayCCTV';
+
+type PrivacyRole = 'manager' | 'agent' | 'viewer';
 
 type TruckData = {
   id: string;
@@ -51,7 +61,7 @@ type FleetSummary = {
   dotInspectionsDueSoon: number;
 };
 
-type Driver = { id: string; name: string; nameEncrypted?: boolean; homeBase: string };
+type Driver = { id: string; name: string; nameEncrypted?: boolean; homeBase: string; cdlNumber?: string; phone?: string; hireDate?: string };
 
 export default function AegisDashboard() {
   const [summary, setSummary] = useState<FleetSummary | null>(null);
@@ -64,12 +74,14 @@ export default function AegisDashboard() {
   >([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [role, setRole] = useState<PrivacyRole>('manager');
+  const [privacyOpen, setPrivacyOpen] = useState(false);
 
-  // Fetch fleet data — revalidate every 10s
+  // Fetch fleet data — revalidate every 10s (and on role change)
   useEffect(() => {
     const fetchFleet = async () => {
       try {
-        const r = await fetch('/api/telematics');
+        const r = await fetch(`/api/telematics?role=${role}`);
         const data = await r.json();
         setSummary(data.summary);
         setTrucks(data.fleet.trucks);
@@ -83,7 +95,7 @@ export default function AegisDashboard() {
     fetchFleet();
     const iv = setInterval(fetchFleet, 10000);
     return () => clearInterval(iv);
-  }, []);
+  }, [role]);
 
   // Send chat message
   const sendChat = async () => {
@@ -152,6 +164,7 @@ export default function AegisDashboard() {
               <span>Intel Globe</span>
               <ArrowUpRight className="w-3.5 h-3.5" />
             </a>
+            <RoleToggle role={role} setRole={setRole} onShowInfo={() => setPrivacyOpen(true)} />
             <div className="px-3 py-1.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-300 text-[10px] uppercase tracking-widest font-medium">
               Demo Logistics · TX
             </div>
@@ -198,6 +211,10 @@ export default function AegisDashboard() {
                 )}
               </div>
             </div>
+
+            {role !== 'manager' && (
+              <PrivacyStrip role={role} onShowInfo={() => setPrivacyOpen(true)} />
+            )}
           </div>
         )}
       </header>
@@ -243,8 +260,8 @@ export default function AegisDashboard() {
                   <span className="font-bold text-amber-300 font-mono">{t.id}</span>
                   <StatusPill status={t.status} />
                 </div>
-                <div className="text-xs text-slate-300 font-medium">
-                  {drivers[t.driverId]?.name || t.driverId}
+                <div className="text-xs text-slate-300 font-medium flex items-center gap-1">
+                  <DriverName driver={drivers[t.driverId]} role={role} compact />
                 </div>
                 <div className="text-[10px] text-slate-500 mt-0.5 truncate">
                   {t.location.address}
@@ -308,9 +325,12 @@ export default function AegisDashboard() {
                     </h2>
                     <span className="text-slate-400 text-sm">{vinShort(sel)}</span>
                   </div>
-                  <p className="text-sm text-slate-300">
-                    {selDriver?.name || sel.driverId}
-                    <span className="text-slate-600 mx-2">·</span>
+                  <p className="text-sm text-slate-300 flex items-center gap-2">
+                    <DriverName
+                      driver={selDriver}
+                      role={role}
+                    />
+                    <span className="text-slate-600">·</span>
                     <span className="text-slate-400">{sel.location.address}</span>
                   </p>
                 </div>
@@ -422,6 +442,9 @@ export default function AegisDashboard() {
                   </div>
                 </div>
               </div>
+
+              {/* Highway CCTV — cameras near this truck */}
+              <HighwayCCTV truck={sel} />
             </div>
           ) : (
             <div className="text-center py-20 text-slate-500">Select a truck to view details</div>
@@ -551,6 +574,91 @@ export default function AegisDashboard() {
         )}
       </AnimatePresence>
 
+      {/* Privacy Guardian modal */}
+      <AnimatePresence>
+        {privacyOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-6"
+            onClick={() => setPrivacyOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 10 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg bg-[#0a0e1a] border border-amber-500/30 rounded-lg shadow-2xl overflow-hidden"
+            >
+              <div className="p-5 border-b border-slate-800 flex items-start justify-between bg-gradient-to-r from-amber-500/10 via-transparent to-transparent">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-md bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+                    <ShieldAlert className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div>
+                    <div className="text-base font-bold text-white">Privacy Guardian</div>
+                    <div className="text-[10px] uppercase tracking-[0.25em] text-slate-500 font-bold">Driver PII Isolation</div>
+                  </div>
+                </div>
+                <button onClick={() => setPrivacyOpen(false)} className="text-slate-500 hover:text-slate-300">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4 text-sm text-slate-300">
+                <p>
+                  Aegis treats driver PII as a <span className="text-amber-300 font-semibold">separate trust boundary</span> from fleet
+                  telemetry. Driver names, CDL numbers, phone numbers, and hire date are encrypted at rest and gated by role.
+                </p>
+
+                <div className="grid grid-cols-1 gap-2">
+                  <RoleCard
+                    icon={<ShieldCheck className="w-4 h-4 text-emerald-400" />}
+                    title="Fleet Manager (you)"
+                    body="Full names, contact info, CDL details. Can dispatch, message, and re-assign."
+                  />
+                  <RoleCard
+                    icon={<Eye className="w-4 h-4 text-amber-400" />}
+                    title="Agent / API consumer"
+                    body="Initials only (e.g. M.J.). Sees duty status, faults, location. No CDL or phone."
+                  />
+                  <RoleCard
+                    icon={<EyeOff className="w-4 h-4 text-slate-400" />}
+                    title="Third-party viewer"
+                    body="No name at all. Only truck ID, anonymized route, and aggregate stats."
+                  />
+                </div>
+
+                <div className="p-3 rounded border border-slate-800 bg-slate-900/50 text-xs text-slate-400 flex items-start gap-2">
+                  <Lock className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="text-slate-200 font-semibold">How it works:</span> every driver record is stored with
+                    per-tenant encryption. API responses are masked server-side based on the requester's role — not the client.
+                    Toggle above to see the difference live.
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-2">
+                <button
+                  onClick={() => setRole('manager')}
+                  className="px-3 py-2 rounded text-xs font-bold bg-amber-500 text-slate-900 hover:bg-amber-400 transition"
+                >
+                  View as Fleet Manager
+                </button>
+                <button
+                  onClick={() => setRole('agent')}
+                  className="px-3 py-2 rounded text-xs font-bold border border-slate-700 text-slate-300 hover:text-amber-300 hover:border-amber-500/50 transition"
+                >
+                  View as Agent
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Footer */}
       <footer className="border-t border-slate-800 bg-slate-900/50 px-6 py-2 text-[10px] text-slate-500 flex items-center justify-between">
         <span className="flex items-center gap-2">
@@ -666,7 +774,6 @@ function TelemetryCard({
   );
 }
 
-// SVG map: stylized Texas region with truck markers + truck IDs
 function FleetMap({
   trucks,
   selectedTruck,
@@ -740,6 +847,142 @@ function FleetMap({
       <div className="absolute top-2 left-2 text-[9px] text-slate-500 bg-slate-900/80 px-2 py-1 rounded border border-slate-800 flex items-center gap-2">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
         live telemetry · 10s refresh
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────── Privacy Guardian components ─────────────────────
+
+function RoleToggle({
+  role,
+  setRole,
+  onShowInfo,
+}: {
+  role: PrivacyRole;
+  setRole: (r: PrivacyRole) => void;
+  onShowInfo: () => void;
+}) {
+  const labels: PrivacyRole[] = ['manager', 'agent', 'viewer'];
+  const icons: Record<PrivacyRole, React.ReactNode> = {
+    manager: <ShieldCheck className="w-3.5 h-3.5" />,
+    agent: <Eye className="w-3.5 h-3.5" />,
+    viewer: <EyeOff className="w-3.5 h-3.5" />,
+  };
+  return (
+    <div className="hidden sm:flex items-center gap-2">
+      <div className="inline-flex rounded-md border border-slate-700 bg-slate-900/60 p-0.5">
+        {labels.map((l) => {
+          const active = role === l;
+          return (
+            <button
+              key={l}
+              onClick={() => setRole(l)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] uppercase tracking-widest font-bold transition ${
+                active
+                  ? l === 'manager'
+                    ? 'bg-amber-500 text-slate-900'
+                    : 'bg-slate-700 text-amber-300'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title={`View as ${l}`}
+            >
+              {icons[l]}
+              <span>{l}</span>
+            </button>
+          );
+        })}
+      </div>
+      <button
+        onClick={onShowInfo}
+        className="p-1.5 rounded border border-slate-700 text-slate-400 hover:text-amber-300 hover:border-amber-500/50 transition"
+        title="About Privacy Guardian"
+      >
+        <Info className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function PrivacyStrip({
+  role,
+  onShowInfo,
+}: {
+  role: PrivacyRole;
+  onShowInfo: () => void;
+}) {
+  const label =
+    role === 'agent'
+      ? 'Drivers shown as initials — Agent role, no CDL/phone/dob access'
+      : 'Drivers fully masked — Viewer role, no name/contact info';
+  const Icon = role === 'agent' ? Eye : EyeOff;
+  return (
+    <button
+      onClick={onShowInfo}
+      className="mt-3 w-full text-left flex items-center justify-between gap-3 px-3 py-2 rounded border border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 transition group"
+    >
+      <div className="flex items-center gap-2 text-amber-300 text-xs">
+        <ShieldAlert className="w-4 h-4" />
+        <Icon className="w-3.5 h-3.5" />
+        <span className="uppercase tracking-widest text-[10px] font-bold">Privacy Guardian · {role}</span>
+        <span className="text-slate-400 normal-case tracking-normal font-normal">{label}</span>
+      </div>
+      <span className="text-[10px] uppercase tracking-widest text-amber-400 font-medium opacity-0 group-hover:opacity-100 transition">
+        How it works &rarr;
+      </span>
+    </button>
+  );
+}
+
+function DriverName({
+  driver,
+  role,
+  compact,
+}: {
+  driver?: Driver;
+  role: PrivacyRole;
+  compact?: boolean;
+}) {
+  if (!driver) return <span>—</span>;
+  const masked = role !== 'manager';
+  if (!masked) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-slate-200">
+        {driver.name}
+        <ShieldCheck className="w-3 h-3 text-emerald-400" aria-label="PII unlocked" />
+      </span>
+    );
+  }
+  const initials = driver.name
+    .split(' ')
+    .map((p) => p[0])
+    .filter(Boolean)
+    .join('.');
+  return (
+    <span className="inline-flex items-center gap-1.5 text-slate-400">
+      <span className={`font-mono ${compact ? '' : 'px-1.5 py-0.5 bg-slate-800 rounded text-[11px]'}`}>
+        {initials}.
+      </span>
+      <Lock className="w-3 h-3 text-amber-400" aria-label="PII locked" />
+    </span>
+  );
+}
+
+function RoleCard({
+  icon,
+  title,
+  body,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="flex items-start gap-3 p-3 rounded border border-slate-800 bg-slate-900/40">
+      <div className="flex-shrink-0 mt-0.5">{icon}</div>
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold text-slate-100 text-xs uppercase tracking-widest">{title}</div>
+        <div className="text-xs text-slate-400 mt-1">{body}</div>
       </div>
     </div>
   );

@@ -70,7 +70,7 @@ export async function GET(request: Request) {
     id: 'aegis-demo-fleet-001',
     name: 'Demo Logistics LLC',
     trucks: allTrucks,
-    drivers: allDrivers,
+    drivers: allDrivers.map((d) => maskDriver(d, role)),
     lastUpdateTs: Date.now(),
   };
 
