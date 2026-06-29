@@ -26,18 +26,18 @@ type TruckPin = {
 const DEFAULT_LAYERS: Record<string, boolean> = {
   // Aegis-fleet always on
   aegis_fleet: true,
-  // OSIRIS feeds we want on by default for a fleet-ops demo
+  // OSIRIS feeds on for the fleet-ops demo
   fires: true,
-  cctv: true,
+  cctv: false,           // 6,971 dots would clutter; user can toggle
   maritime: true,
-  flights: true,
+  flights: false,        // 1000+ would clutter; user can toggle
   earthquakes: true,
   weather: false,
   // Cosmetic
-  day_night: true,
+  day_night: false,
   graticule: true,
-  // Off by default
-  gdelt: false,
+  // Off by default (heavy intel layers — keep noise low)
+  global_incidents: false,           // GDELT feed in panel
   infrastructure: false,
   sigint: false,
   radiation: false,
@@ -63,7 +63,6 @@ export default function AegisGlobePage() {
   const [data, setData] = useState<any>({});
   const [fleet, setFleet] = useState<TruckPin[]>([]);
   const [fleetSummary, setFleetSummary] = useState<{ moving: number; idle: number; maintenance: number; offline: number }>({ moving: 0, idle: 0, maintenance: 0, offline: 0 });
-  const [version, setVersion] = useState(0);
   const [lastUpdate, setLastUpdate] = useState<number>(Date.now());
   const [flyToLocation, setFlyToLocation] = useState<{ lat: number; lng: number; zoom?: number; ts: number } | null>({
     lat: 30.0,
@@ -141,7 +140,6 @@ export default function AegisGlobePage() {
         maintenance: pins.filter((p) => p.status === 'maintenance').length,
         offline: pins.filter((p) => p.status === 'offline').length,
       });
-      setVersion((v) => v + 1);
     } catch (e) {
       console.error('[globe] fleet fetch', e);
     }
@@ -149,26 +147,43 @@ export default function AegisGlobePage() {
 
   useEffect(() => {
     refreshFleet();
-    const iv = setInterval(refreshFleet, 10000);
+    // Fleet is local in-process state — refresh every 30s (not 10s) so the
+    // map doesn't re-paint constantly. Click 'Refresh' header button for on-demand.
+    const iv = setInterval(refreshFleet, 30_000);
     return () => clearInterval(iv);
   }, [refreshFleet]);
 
-  // ───── Inject fleet + aegis CCTV filter into the data map ─────
+// ───── Inject fleet + jitter so all 5 trucks are visible at any zoom ─────
   const enrichedData = useMemo(() => {
-    // Build a "cameras" array of OSIRIS CCTV + Aegis Highway CCTV (for clicks on a truck)
+    // Deterministic jitter offset per truck id — spreads overlapping pins
+    // across an ~1km box so they don't stack invisibly in Texas metro.
+    const jitter = (id: string) => {
+      // Deterministic jitter offset per truck id — spreads overlapping pins
+      // across an ~80km box so they don't stack invisibly in Texas metro.
+      // Use the truck INDEX not hash so trucks spread evenly, not clustered.
+      const idx = fleet.findIndex((f) => f.id === id);
+      const ring = idx % 2;
+      const dot = Math.floor(idx / 2);
+      const angle = dot * 1.4 + (ring ? Math.PI / 2 : 0);
+      const radius = 0.35 + dot * 0.12;
+      return [Math.cos(angle) * radius * 0.6, Math.sin(angle) * radius * 0.6];
+    };
     return {
       ...data,
-      aegis_fleet: fleet.map((t) => ({
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: [t.lng, t.lat] },
-        properties: {
-          id: t.id,
-          status: t.status,
-          driver: t.driverName,
-          faults: t.faultCount ?? 0,
-          address: t.address,
-        },
-      })),
+      aegis_fleet: fleet.map((t) => {
+        const [dx, dy] = jitter(t.id);
+        return {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [t.lng + dx, t.lat + dy] },
+          properties: {
+            id: t.id,
+            status: t.status,
+            driver: t.driverName,
+            faults: t.faultCount ?? 0,
+            address: t.address,
+          },
+        };
+      }),
     };
   }, [data, fleet]);
 
@@ -199,6 +214,27 @@ export default function AegisGlobePage() {
           </span>
         </div>
         <div className="hidden md:flex items-center gap-4 text-[10px] uppercase tracking-[0.2em]">
+          <button
+            type="button"
+            onClick={() => {
+              fetchEndpoint('/api/fires');
+              fetchEndpoint('/api/cctv?region=all&v=2');
+              fetchEndpoint('/api/maritime', (d) => ({
+                maritime_ports: d.ports,
+                maritime_chokepoints: d.chokepoints,
+                maritime_ships: d.ships,
+              }));
+              fetchEndpoint('/api/flights');
+              fetchEndpoint('/api/earthquakes');
+              refreshFleet();
+              setLastUpdate(Date.now());
+            }}
+            className="flex items-center gap-1.5 px-2 py-1 rounded border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition"
+            title="Manually refresh intel feeds"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Refresh now</span>
+          </button>
           <span className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-slate-400">Live</span>
@@ -229,10 +265,10 @@ export default function AegisGlobePage() {
       <div className="flex-1 relative overflow-hidden">
         <ErrorBoundary name="Aegis Globe">
           <OsirisMap
-            key={`aegis-${version}-${activeLayers.day_night}-${activeLayers.graticule}`}
+            key={`aegis-${activeLayers.day_night}-${activeLayers.graticule}`}
             data={enrichedData}
             activeLayers={activeLayers}
-            projection="globe"
+            projection="mercator"
             mapStyle="dark"
             onEntityClick={handleEntityClick}
             onViewStateChange={(vs) => {
@@ -250,17 +286,13 @@ export default function AegisGlobePage() {
             onDrillToDashboard={(t) => router.push(`/dashboard?truck=${encodeURIComponent(t.id)}`)}
           />
 
-          {/* OSIRIS LayerPanel — re-skinned with Aegis-themed wrapper if needed (uses its own theme prop) */}
-          <div className="absolute top-4 right-4 z-20 max-h-[calc(100vh-120px)] overflow-y-auto">
-            <div className="bg-[#0a0e1a]/92 border border-amber-500/20 rounded-lg backdrop-blur-md">
-              <LayerPanel
-                data={enrichedData}
-                activeLayers={activeLayers}
-                setActiveLayers={setActiveLayers}
-                theme="core"
-              />
-            </div>
-          </div>
+          {/* OSIRIS LayerPanel — positioned by itself (it uses fixed/absolute itself) */}
+          <LayerPanel
+            data={enrichedData}
+            activeLayers={activeLayers}
+            setActiveLayers={setActiveLayers}
+            theme="core"
+          />
 
           {/* CCT Viewer (OSIRIS component) opens when CCTV point is clicked */}
           {activeCamera && (
@@ -301,7 +333,7 @@ function FleetOverlayPanel({
   onDrillToDashboard: (t: TruckPin) => void;
 }) {
   return (
-    <div className="absolute top-4 left-4 w-72 z-10 max-h-[calc(100vh-160px)] overflow-y-auto bg-[#0a0e1a]/92 border border-amber-500/30 rounded-lg p-4 backdrop-blur-md">
+    <div className="absolute top-4 right-4 w-72 z-10 max-h-[calc(100vh-120px)] overflow-y-auto bg-[#0a0e1a]/92 border border-amber-500/30 rounded-lg p-4 backdrop-blur-md">
       <div className="flex items-center gap-2 mb-3">
         <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
         <h3 className="text-[10px] uppercase tracking-[0.25em] text-amber-400 font-bold">

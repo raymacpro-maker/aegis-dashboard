@@ -623,6 +623,13 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-offset': [0, 1.2], 'text-allow-overlap': false,
       }, paint: { 'text-color': ['match', ['get','type'], 'military','#D32F2F', 'tanker','#E65100', 'cargo','#26C6DA', '#B0BEC5'], 'text-halo-color': '#000', 'text-halo-width': 1 }});
 
+            // Re-order Aegis fleet layers to TOP of stack so they aren't covered by fires/cctv dots
+      try {
+        ['aegis-fleet-halo', 'aegis-fleet-dot', 'aegis-fleet-label'].forEach((id) => {
+          if (map.getLayer(id)) map.moveLayer(id);
+        });
+      } catch {}
+
       setMapReady(true);
     });
 
