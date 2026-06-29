@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Aegis shield: minimal, modern, amber. Not Egyptian. -->
+  <defs>
+    <linearGradient id="aegisShield" x1="32" y1="4" x2="32" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#b45309" />
+    </linearGradient>
+    <linearGradient id="aegisSheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#fff" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <!-- Shield outline -->
+  <path d="M32 4 L56 12 V30 C56 44 46 54 32 60 C18 54 8 44 8 30 V12 Z"
+        fill="url(#aegisShield)" stroke="#fbbf24" stroke-width="1.5" />
+  <!-- Inner geometric: stylised "A" for Aegis (chevron + crossbar) -->
+  <path d="M32 18 L22 42 H27 L29 36 H35 L37 42 H42 Z"
+        fill="#0a0e1a" />
+  <rect x="27" y="32" width="10" height="3" fill="#0a0e1a" />
+  <!-- Sheen -->
+  <path d="M32 4 L56 12 V20 C56 18 46 14 32 14 C18 14 8 18 8 20 V12 Z"
+        fill="url(#aegisSheen)" />
+</svg>

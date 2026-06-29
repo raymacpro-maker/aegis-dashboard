@@ -12,6 +12,13 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: '**' },
     ],
   },
+  async redirects() {
+    return [
+      // OSIRIS homepage → Aegis command center
+      { source: '/', destination: '/dashboard', permanent: false },
+      // Legacy OSIRIS routes still reachable by direct path; dashboard is the index
+    ];
+  },
   async headers() {
     return [
       {
