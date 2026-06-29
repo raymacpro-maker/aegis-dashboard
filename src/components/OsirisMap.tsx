@@ -142,7 +142,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: styleUrl,
-      center: [25.48, 42.70], zoom: 6.5, minZoom: 1.5, maxZoom: 18,
+      center: [-97.5, 30.5], zoom: 4.0, minZoom: 1.5, maxZoom: 18,
       attributionControl: false,
       maxPitch: 85,
       transformRequest: (url: string) => {
@@ -181,8 +181,70 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       createDot(map, 'dot-fire', isGhost ? phantomPurple : '#E65100', 10);
       createDot(map, 'dot-cctv', cameraColor, 10);
 
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'malware-nodes', 'network-mesh'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'malware-nodes', 'network-mesh', 'aegis-fleet'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
+
+      // ── Aegis fleet pins (overlay layer for fleet-ops side) ──
+      map.addLayer({
+        id: 'aegis-fleet-halo',
+        type: 'circle',
+        source: 'aegis-fleet',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 14, 5, 24, 8, 32],
+          'circle-color': ['match', ['get', 'status'],
+            'moving', '#10b981',
+            'idle', '#f59e0b',
+            'maintenance', '#3b82f6',
+            'offline', '#64748b',
+            '#10b981'],
+          'circle-opacity': 0.22,
+          'circle-blur': 0.6,
+        },
+      });
+      map.addLayer({
+        id: 'aegis-fleet-dot',
+        type: 'circle',
+        source: 'aegis-fleet',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 7, 5, 12, 8, 14],
+          'circle-color': ['match', ['get', 'status'],
+            'moving', '#10b981',
+            'idle', '#f59e0b',
+            'maintenance', '#3b82f6',
+            'offline', '#64748b',
+            '#10b981'],
+          'circle-stroke-color': '#fff',
+          'circle-stroke-width': 2,
+        },
+      });
+      try {
+        map.addLayer({
+          id: 'aegis-fleet-label',
+          type: 'symbol',
+          source: 'aegis-fleet',
+          minzoom: 2,
+          layout: {
+            'text-field': ['get', 'id'],
+            'text-size': 11,
+            'text-offset': [0, 1.4],
+            'text-anchor': 'top',
+            'text-allow-overlap': false,
+          },
+          paint: {
+            'text-color': '#fbbf24',
+            'text-halo-color': '#04040A',
+            'text-halo-width': 2,
+            'text-halo-blur': 0.3,
+          },
+        });
+      } catch {}
+      map.on('click', 'aegis-fleet-dot', (e: any) => {
+        const feat = e.features?.[0];
+        const p = feat?.properties;
+        if (p) onEntityClick?.({ type: 'aegis_truck', data: p });
+      });
+      map.on('mouseenter', 'aegis-fleet-dot', () => (map.getCanvas().style.cursor = 'pointer'));
+      map.on('mouseleave', 'aegis-fleet-dot', () => (map.getCanvas().style.cursor = ''));
 
       // Warning icon generator (parameterized — eliminates 3x copy-paste)
       const createWarningIcon = (id: string, color: string) => {
@@ -1199,6 +1261,18 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setGeo('fires', activeLayers.fires && data.fires ? data.fires.map((f: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [f.lng, f.lat] }, properties: { brightness: f.brightness } })) : []);
   }, [mapReady, data.fires, activeLayers.fires, setGeo]);
 
+  // Aegis fleet pins — populated from data.aegis_fleet (set by /globe page)
+  useEffect(() => {
+    if (!mapReady) return;
+    setGeo('aegis-fleet', data.aegis_fleet || []);
+    const map = mapRef.current;
+    if (!map) return;
+    const vis = activeLayers.aegis_fleet ? 'visible' : 'none';
+    ['aegis-fleet-halo', 'aegis-fleet-dot', 'aegis-fleet-label'].forEach((id) => {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis);
+    });
+  }, [mapReady, data.aegis_fleet, activeLayers.aegis_fleet, setGeo]);
+
   useEffect(() => {
     if (!mapReady) return;
     setGeo('weather', activeLayers.weather && data.weather_events ? data.weather_events.map((w: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [w.lng, w.lat] }, properties: { title: w.title, type: w.type, icon: w.icon, severity: w.severity, source: w.source, id: w.id } })) : []);
@@ -1471,6 +1545,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   // Fly-to
   useEffect(() => {
     if (!mapReady || !mapRef.current || !flyToLocation) return;
+    console.log('[globe] flying to', flyToLocation);
     mapRef.current.flyTo({ center: [flyToLocation.lng, flyToLocation.lat], zoom: flyToLocation.zoom || 8, duration: 2000 });
   }, [mapReady, flyToLocation]);
 
