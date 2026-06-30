@@ -56,7 +56,26 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
 
     if (streamType === 'hls' && camera.stream_url) {
       if (Hls.isSupported() && videoRef.current) {
-        const hls = new Hls({ enableWorker: false });
+        // hls.js config tuned for live camera streams:
+        // - low latency (target 2-3s) so the user sees real-time
+        // - aggressive manifest refresh (Caltrans rotates chunklist IDs)
+        // - retry on 404 chunklist errors (Caltrans m3u8 expires quickly)
+        // - max 3 retries before giving up
+        const hls = new Hls({
+          enableWorker: false,
+          lowLatencyMode: true,
+          liveSyncDurationCount: 3,
+          liveMaxLatencyDurationCount: 8,
+          manifestLoadingTimeOut: 8000,
+          manifestLoadingMaxRetry: 2,
+          manifestLoadingRetryDelay: 500,
+          levelLoadingTimeOut: 8000,
+          levelLoadingMaxRetry: 2,
+          levelLoadingRetryDelay: 500,
+          fragLoadingTimeOut: 8000,
+          fragLoadingMaxRetry: 2,
+          fragLoadingRetryDelay: 500,
+        });
         hlsRef.current = hls;
         hls.loadSource(camera.stream_url);
         hls.attachMedia(videoRef.current);
@@ -65,14 +84,35 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
           videoRef.current?.play().catch(() => {});
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
-          if (data.fatal) setError(true);
+          // Auto-recover on common transient errors
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                // Try to recover by reloading the manifest
+                console.warn('[HLS] network error, attempting recovery', data.details);
+                try { hls.startLoad(); } catch {}
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.warn('[HLS] media error, attempting recovery', data.details);
+                try { hls.recoverMediaError(); } catch {}
+                break;
+              default:
+                // 404 chunklist or unrecoverable — show error
+                setError(true);
+            }
+          } else {
+            // Non-fatal — log and continue
+            console.debug('[HLS] non-fatal', data.type, data.details);
+          }
         });
       } else if (videoRef.current?.canPlayType('application/vnd.apple.mpegurl')) {
+        // Native HLS (Safari) — just set the src
         videoRef.current.src = camera.stream_url;
         videoRef.current.addEventListener('loadedmetadata', () => {
           setLoading(false);
           videoRef.current?.play().catch(() => {});
         });
+        videoRef.current.addEventListener('error', () => setError(true));
       }
       return;
     }
@@ -258,6 +298,7 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
                 autoPlay
                 muted
                 playsInline
+                crossOrigin="anonymous"
               />
             ) : streamType === 'mjpeg' && camera.stream_url ? (
               <img

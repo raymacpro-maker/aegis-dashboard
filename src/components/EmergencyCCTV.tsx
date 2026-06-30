@@ -268,16 +268,44 @@ function useHlsStream(url: string, enabled: boolean) {
     const isHlsNative = video.canPlayType('application/vnd.apple.mpegurl') !== '';
     if (isHlsNative) {
       video.src = url;
+      video.addEventListener('error', () => setErr(true));
     } else {
       // dynamic import so hls.js doesn't bloat SSR bundle
       import('hls.js').then((mod) => {
         const Hls = mod.default;
         if (Hls.isSupported()) {
-          hls = new Hls({ liveSyncDurationCount: 3, maxBufferLength: 10 });
+          // Tuned for live camera streams: low-latency, manifest refresh,
+          // retry on 404 chunklist (Caltrans rotates chunklist IDs)
+          hls = new Hls({
+            enableWorker: false,
+            lowLatencyMode: true,
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 8,
+            manifestLoadingTimeOut: 8000,
+            manifestLoadingMaxRetry: 2,
+            manifestLoadingRetryDelay: 500,
+            levelLoadingTimeOut: 8000,
+            levelLoadingMaxRetry: 2,
+            levelLoadingRetryDelay: 500,
+            fragLoadingTimeOut: 8000,
+            fragLoadingMaxRetry: 2,
+            fragLoadingRetryDelay: 500,
+          });
           hls.loadSource(url);
           hls.attachMedia(video);
           hls.on(Hls.Events.ERROR, (_e, data) => {
-            if (data.fatal) setErr(true);
+            if (data.fatal) {
+              switch (data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                  try { hls?.startLoad(); } catch {}
+                  break;
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                  try { hls?.recoverMediaError(); } catch {}
+                  break;
+                default:
+                  setErr(true);
+              }
+            }
           });
         } else {
           setErr(true);

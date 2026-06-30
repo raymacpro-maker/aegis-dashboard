@@ -60,12 +60,18 @@ export async function GET(req: NextRequest) {
       })
       .join('\n');
 
+    // Cache the m3u8 for only 3 seconds (Caltrans rotates chunklist IDs frequently;
+    // a longer cache causes hls.js to use a dead chunklist). Use no-store to
+    // force revalidation since Caltrans sets Cache-Control: no-cache upstream.
+    const isMaster = /EXT-X-STREAM-INF/.test(rewritten);
     return new NextResponse(rewritten, {
       headers: {
         'Content-Type': 'application/vnd.apple.mpegurl',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Cache-Control': 'public, max-age=10',
+        // Master playlist: very short cache (Caltrans rotates chunklist IDs every few seconds).
+        // Media playlist: short cache (segment URLs are stable within a window).
+        'Cache-Control': isMaster ? 'public, max-age=3' : 'public, max-age=10',
       },
     });
   } catch (e) {
