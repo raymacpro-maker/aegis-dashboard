@@ -544,9 +544,6 @@ export default function AegisDashboard() {
 
               {/* Highway CCTV — cameras near this truck */}
               <HighwayCCTV truck={sel} />
-
-              {/* Emergency Live Traffic Feeds — always-on, refreshed every 4s */}
-              <EmergencyCCTV />
             </div>
           ) : (
             <div className="text-center py-20 text-slate-500">Select a truck to view details</div>
