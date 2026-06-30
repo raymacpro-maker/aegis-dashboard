@@ -85,7 +85,15 @@ async function fetchCaltransCameras(): Promise<any[]> {
         city: c.state,
         country: c.country,
         feed_url: c.url,
-        stream_url: c.format === 'M3U8' ? c.url.replace('/api/caltrans-hls-proxy?url=', '').replace(/&.*$/, '') : '',
+        // c.url is the proxy URL (or direct jpg). To get the raw upstream HLS URL,
+        // we need to un-encode the query param. Easiest: c.url is '/api/caltrans-hls-proxy?url=<encoded>',
+        // decodeURIComponent gives us the raw wzmedia URL. Fallback: use c.url as-is.
+        stream_url: c.hasLiveStream
+          ? (() => {
+              const m = c.url.match(/^\/api\/caltrans-hls-proxy\?url=(.+)$/);
+              try { return m ? decodeURIComponent(m[1]) : c.url; } catch { return c.url; }
+            })()
+          : '',
         stream_type: c.hasLiveStream ? 'hls' : 'image',
         source: 'Caltrans',
       }));
