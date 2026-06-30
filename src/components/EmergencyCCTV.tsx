@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Camera, ExternalLink, RefreshCw, MapPin, X, ChevronLeft, ChevronRight,
-  Search, Globe, Building2, Wifi, WifiOff, Truck, Crosshair,
+  Search, Globe, Building2, Wifi, WifiOff, Truck, Crosshair, Power,
 } from 'lucide-react';
 
 type CamSource = 'public' | 'company';
