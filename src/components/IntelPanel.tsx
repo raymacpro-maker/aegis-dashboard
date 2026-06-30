@@ -15,7 +15,7 @@ const TABS: Array<{ key: Tab; label: string; icon: React.ReactNode; color: strin
   { key: 'fleet',   label: 'Fleet',     icon: <Truck className="w-3.5 h-3.5" />,       color: 'text-amber-400' },
   { key: 'cctv',    label: 'CCTV',      icon: <Camera className="w-3.5 h-3.5" />,      color: 'text-cyan-400' },
   { key: 'maritime',label: 'Maritime',  icon: <Anchor className="w-3.5 h-3.5" />,      color: 'text-blue-400' },
-  { key: 'global',  label: 'Global',    icon: <Newspaper className="w-3.5 h-3.5" />,   color: 'text-emerald-400' },
+  { key: 'global',  label: 'News',      icon: <Newspaper className="w-3.5 h-3.5" />,   color: 'text-emerald-400' },
 ];
 
 export default function IntelPanel({

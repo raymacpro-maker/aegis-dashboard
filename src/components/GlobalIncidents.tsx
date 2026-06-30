@@ -1,173 +1,156 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Globe2, ExternalLink, AlertTriangle, Newspaper, Radio } from 'lucide-react';
+import { Truck, ExternalLink, TrendingUp, AlertTriangle, Radio } from 'lucide-react';
 
 type NewsItem = {
   id: string;
   title: string;
-  description?: string;
-  link?: string;
-  published: string;
-  source?: string;
+  link: string;
+  pubDate: string;
+  ageHours: number;
+  source: string;
+  sourceUrl: string;
+  category: 'industry' | 'rates' | 'safety' | 'drivers';
 };
 
-type LiveFeed = {
-  id: string;
-  name: string;
-  city?: string;
-  country?: string;
-  url: string;
-  category?: string;
+const CATEGORY_META: Record<NewsItem['category'], { label: string; color: string; bg: string; border: string; dot: string }> = {
+  industry: { label: 'Industry', color: 'text-amber-300',   bg: 'bg-amber-500/10',   border: 'border-amber-500/30',   dot: 'bg-amber-400' },
+  rates:    { label: 'Rates',    color: 'text-emerald-300', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', dot: 'bg-emerald-400' },
+  safety:   { label: 'Safety',   color: 'text-red-300',     bg: 'bg-red-500/10',     border: 'border-red-500/30',     dot: 'bg-red-400' },
+  drivers:  { label: 'Drivers',  color: 'text-blue-300',    bg: 'bg-blue-500/10',    border: 'border-blue-500/30',    dot: 'bg-blue-400' },
 };
 
-const SEVERITY_COLORS: Record<string, { dot: string; text: string; bg: string }> = {
-  CRITICAL: { dot: 'bg-red-400',    text: 'text-red-300',    bg: 'bg-red-500/10 border-red-500/30' },
-  HIGH:     { dot: 'bg-orange-400', text: 'text-orange-300', bg: 'bg-orange-500/10 border-orange-500/30' },
-  MEDIUM:   { dot: 'bg-amber-400',  text: 'text-amber-300',  bg: 'bg-amber-500/10 border-amber-500/30' },
-  LOW:      { dot: 'bg-blue-400',   text: 'text-blue-300',   bg: 'bg-blue-500/10 border-blue-500/30' },
-};
-
-// Crude keyword-based severity for headlines
-function severityOf(title: string): keyof typeof SEVERITY_COLORS {
-  const t = title.toLowerCase();
-  if (/\b(breach|attack|ransomware|exploit|0day|cve|shutdown|outage|cyber|critical)\b/.test(t)) return 'CRITICAL';
-  if (/\b(hack|leak|vulnerability|exposed|stolen|malware|threat)\b/.test(t)) return 'HIGH';
-  if (/\b(virus|phishing|scam|warning|alert|suspicious)\b/.test(t)) return 'MEDIUM';
-  return 'LOW';
+function timeAgo(hours: number): string {
+  if (hours < 1) return `${Math.round(hours * 60)}m ago`;
+  if (hours < 24) return `${Math.round(hours)}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }
 
-function timeAgo(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+function freshDot(hours: number): string {
+  if (hours < 1) return 'bg-emerald-400';
+  if (hours < 6) return 'bg-amber-400';
+  return 'bg-slate-500';
 }
 
 export default function GlobalIncidents() {
-  const [news, setNews] = useState<NewsItem[]>([]);
-  const [liveFeeds, setLiveFeeds] = useState<LiveFeed[]>([]);
+  const [items, setItems] = useState<NewsItem[]>([]);
+  const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState<number>(0);
 
   useEffect(() => {
     let cancelled = false;
     const fetchData = async () => {
       try {
-        const [newsRes, liveRes] = await Promise.allSettled([
-          fetch('/api/news'),
-          fetch('/api/live-news'),
-        ]);
+        const r = await fetch('/api/trucking-news');
+        const data = await r.json();
         if (cancelled) return;
-        if (newsRes.status === 'fulfilled') {
-          const data = await newsRes.value.json();
-          // Filter out the obvious spam/auction posts
-          const items = (data.news || [])
-            .filter((n: NewsItem) => n.title && !/аукцион|ставк/i.test(n.title))
-            .slice(0, 8);
-          setNews(items);
-        }
-        if (liveRes.status === 'fulfilled') {
-          const data = await liveRes.value.json();
-          setLiveFeeds((data.feeds || []).filter((f: LiveFeed) => f.country === 'US').slice(0, 4));
-        }
+        setItems(data.items || []);
+        setTotal(data.total);
+        setLastUpdate(Date.now());
       } catch (e) {
-        console.error('GlobalIncidents fetch failed', e);
+        console.error('Trucking news fetch failed', e);
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
     fetchData();
-    const iv = setInterval(fetchData, 180_000); // 3 min — news is time-sensitive
+    // Refresh every 5 min — news doesn't need to be real-time
+    const iv = setInterval(fetchData, 5 * 60 * 1000);
     return () => {
       cancelled = true;
       clearInterval(iv);
     };
   }, []);
 
+  // Live counter — seconds since last fetch
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  const secondsAgo = lastUpdate ? Math.round((Date.now() - lastUpdate) / 1000) : null;
+
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Globe2 className="w-4 h-4 text-blue-400" />
+          <Truck className="w-4 h-4 text-amber-400" />
           <h3 className="text-[10px] uppercase tracking-[0.25em] text-slate-300 font-bold">
-            Global Incidents
+            Trucking News
           </h3>
         </div>
         <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
-          <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-          {news.length} stories
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+          {loading ? 'loading…' : total !== null ? `${total} today` : ''}
         </div>
       </div>
 
+      {/* Category legend */}
+      <div className="flex items-center gap-2 mb-3 text-[9px] text-slate-500">
+        {Object.entries(CATEGORY_META).map(([key, m]) => (
+          <span key={key} className="flex items-center gap-1">
+            <span className={`w-1 h-1 rounded-full ${m.dot}`} />
+            <span>{m.label}</span>
+          </span>
+        ))}
+      </div>
+
       {loading ? (
-        <div className="text-[10px] text-slate-500 py-3 text-center">loading…</div>
+        <div className="text-[10px] text-slate-500 py-3 text-center">loading trucking news…</div>
+      ) : items.length === 0 ? (
+        <div className="text-[10px] text-slate-500 py-3 text-center">
+          No trucking stories in the last 24h
+        </div>
       ) : (
-        <>
-          {/* News items */}
-          <div className="space-y-1.5 max-h-64 overflow-y-auto">
-            {news.map((n) => {
-              const sev = severityOf(n.title);
-              const c = SEVERITY_COLORS[sev];
-              return (
-                <a
-                  key={n.id}
-                  href={n.link || '#'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`block p-2 rounded border ${c.bg} hover:opacity-80 transition`}
-                >
-                  <div className="flex items-start gap-2">
-                    <span className={`w-1.5 h-1.5 rounded-full ${c.dot} mt-1.5 flex-shrink-0`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs text-slate-100 leading-snug line-clamp-2">
-                        {n.title}
-                      </div>
-                      <div className="flex items-center gap-2 mt-1 text-[9px] text-slate-500">
-                        <span className="uppercase tracking-widest font-bold">{sev}</span>
-                        <span>·</span>
-                        <span>{timeAgo(n.published)}</span>
-                        <ExternalLink className="w-2.5 h-2.5 ml-auto" />
-                      </div>
+        <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
+          {items.map((n) => {
+            const meta = CATEGORY_META[n.category] || CATEGORY_META.industry;
+            const fresh = freshDot(n.ageHours);
+            return (
+              <a
+                key={n.id}
+                href={n.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`block p-2 rounded border ${meta.border} ${meta.bg} hover:opacity-90 hover:border-amber-500/40 transition`}
+              >
+                <div className="flex items-start gap-2">
+                  <div className="flex flex-col items-center gap-1 flex-shrink-0 pt-0.5">
+                    <span className={`w-1.5 h-1.5 rounded-full ${fresh}`} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs text-slate-100 leading-snug line-clamp-2">
+                      {n.title.replace(/ - [^-]+$/, '')}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-1 text-[9px]">
+                      <span className={`uppercase tracking-widest font-bold ${meta.color}`}>
+                        {meta.label}
+                      </span>
+                      <span className="text-slate-600">·</span>
+                      <span className="text-slate-400 truncate max-w-[120px]" title={n.source}>
+                        {n.source}
+                      </span>
+                      <span className="text-slate-600">·</span>
+                      <span className="text-slate-500">{timeAgo(n.ageHours)}</span>
+                      <ExternalLink className="w-2.5 h-2.5 ml-auto text-slate-600 flex-shrink-0" />
                     </div>
                   </div>
-                </a>
-              );
-            })}
-          </div>
-
-          {/* Live US news streams */}
-          {liveFeeds.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-slate-800">
-              <div className="text-[9px] uppercase tracking-widest text-slate-500 font-bold mb-2 flex items-center gap-1">
-                <Radio className="w-2.5 h-2.5" />
-                Live US News Streams
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {liveFeeds.map((f) => (
-                  <a
-                    key={f.id}
-                    href={f.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 p-1.5 rounded border border-slate-800 hover:border-blue-500/50 transition text-[10px]"
-                  >
-                    <Newspaper className="w-3 h-3 text-blue-400 flex-shrink-0" />
-                    <span className="text-slate-200 truncate">{f.name}</span>
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="mt-2 text-[9px] text-slate-500 text-center">
-            Cyber + world news · severity by keyword heuristic · refresh 3 min
-          </div>
-        </>
+                </div>
+              </a>
+            );
+          })}
+        </div>
       )}
+
+      <div className="mt-2 text-[9px] text-slate-500 text-center flex items-center justify-center gap-1.5">
+        <Radio className="w-2.5 h-2.5" />
+        Google News RSS · 4 feeds · last 24h · refresh 5m
+        {secondsAgo !== null && tick > 0 && (
+          <span className="text-slate-600">· {secondsAgo}s ago</span>
+        )}
+      </div>
     </div>
   );
 }
