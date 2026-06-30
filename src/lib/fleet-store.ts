@@ -144,7 +144,7 @@ const seedTrucks: Truck[] = [
   {
     id: 'T-47', vin: '1FUJGLDR5KLAA4729', make: 'Freightliner', model: 'Cascadia', year: 2022, plate: 'TX-7842-JK', class: 'Class 8',
     status: 'moving', driverId: 'D-001',
-    location: { lat: 30.2672, lng: -97.7431, address: 'I-35 N, Austin TX', speedMph: 64, heading: 12 },
+    location: { lat: 37.64160, lng: -118.91800, address: 'SR-203 @ Mammoth Mtn (Caltrans D9)', speedMph: 38, heading: 42 },
     hos: { shiftStartTs: bootMs - 6.5 * HOUR, hoursDriven: 6.2, hoursOnDuty: 7.8, hoursRemaining: { drive: 4.8, shift: 6.2, cycle: 38.5 }, nextBreakRequiredIn: 1.8 },
     fuel: { levelPct: 0.42, mpgRecent: 6.8, estimatedRangeMi: 287 },
     faults: [],
@@ -154,7 +154,7 @@ const seedTrucks: Truck[] = [
   {
     id: 'T-22', vin: '3HSDJSJR8KN001822', make: 'Peterbilt', model: '579', year: 2021, plate: 'TX-3321-MP', class: 'Class 8',
     status: 'idle', driverId: 'D-002',
-    location: { lat: 30.5083, lng: -97.8203, address: 'Pilot Travel Center, Round Rock TX', speedMph: 0, heading: 0 },
+    location: { lat: 38.08820, lng: -119.18080, address: 'US-395 @ Conway Summit (Caltrans D9)', speedMph: 0, heading: 0 },
     hos: { shiftStartTs: bootMs - 9.2 * HOUR, hoursDriven: 8.9, hoursOnDuty: 9.2, hoursRemaining: { drive: 2.1, shift: 4.8, cycle: 31.2 }, nextBreakRequiredIn: 0.1 },
     fuel: { levelPct: 0.78, mpgRecent: 7.1, estimatedRangeMi: 533 },
     faults: [J1939_FAULTS.SPN_3251_FMI_0],
@@ -164,7 +164,7 @@ const seedTrucks: Truck[] = [
   {
     id: 'T-31', vin: '4V4NC9EH8KN901203', make: 'Volvo', model: 'VNL 760', year: 2023, plate: 'TX-9012-RT', class: 'Class 8',
     status: 'moving', driverId: 'D-003',
-    location: { lat: 29.4241, lng: -98.4936, address: 'I-35 S, San Antonio TX', speedMph: 58, heading: 198 },
+    location: { lat: 37.75210, lng: -118.98270, address: 'US-395 @ Crestview (Caltrans D9)', speedMph: 47, heading: 191 },
     hos: { shiftStartTs: bootMs - 2.1 * HOUR, hoursDriven: 2.1, hoursOnDuty: 2.5, hoursRemaining: { drive: 8.9, shift: 11.5, cycle: 47.8 }, nextBreakRequiredIn: 5.9 },
     fuel: { levelPct: 0.22, mpgRecent: 7.4, estimatedRangeMi: 162 },
     faults: [],
@@ -173,8 +173,8 @@ const seedTrucks: Truck[] = [
   },
   {
     id: 'T-58', vin: '1XPBDB9X2KD440112', make: 'Kenworth', model: 'T680', year: 2020, plate: 'TX-5587-LQ', class: 'Class 8',
-    status: 'maintenance', driverId: 'D-004',
-    location: { lat: 30.1945, lng: -97.6694, address: 'Fleetio Service Bay, Austin TX', speedMph: 0, heading: 0 },
+    status: 'moving', driverId: 'D-004',
+    location: { lat: 39.31680, lng: -120.32920, address: 'I-80 @ Donner Pass (Caltrans D3)', speedMph: 32, heading: 78 },
     hos: { shiftStartTs: bootMs - 1.5 * HOUR, hoursDriven: 0, hoursOnDuty: 1.5, hoursRemaining: { drive: 11.0, shift: 12.5, cycle: 68.5 }, nextBreakRequiredIn: 6.5 },
     fuel: { levelPct: 0.95, mpgRecent: 0, estimatedRangeMi: 0 },
     faults: [J1939_FAULTS.SPN_100_FMI_1, J1939_FAULTS.SPN_110_FMI_0],
@@ -184,7 +184,7 @@ const seedTrucks: Truck[] = [
   {
     id: 'T-69', vin: '5KKHALDR9LPLP9821', make: 'Mack', model: 'Anthem', year: 2024, plate: 'TX-6690-WN', class: 'Class 8',
     status: 'offline', driverId: 'D-005',
-    location: { lat: 30.5083, lng: -97.6789, address: 'Last seen: Round Rock TX', speedMph: 0, heading: 0 },
+    location: { lat: 41.13980, lng: -122.30900, address: 'I-5 @ Castella (Caltrans D2)', speedMph: 0, heading: 0 },
     hos: { shiftStartTs: bootMs - 14 * HOUR, hoursDriven: 0, hoursOnDuty: 0, hoursRemaining: { drive: 11.0, shift: 14.0, cycle: 70.0 }, nextBreakRequiredIn: 0 },
     fuel: { levelPct: 0.05, mpgRecent: 0, estimatedRangeMi: 0 },
     faults: [J1939_FAULTS.SPN_3216_FMI_2, J1939_FAULTS.SPN_91_FMI_19],

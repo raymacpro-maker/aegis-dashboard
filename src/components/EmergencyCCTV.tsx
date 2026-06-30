@@ -91,7 +91,7 @@ const COMPANY_CAMS: Cam[] = [
     state: 'Texas', country: 'US',
     description: 'Aegis Yard · Austin Depot (North Gate)',
     lat: 30.2672, lng: -97.7431, direction: 'S',
-    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/sr203mammothmountain/sr203mammothmountain.jpg',
+    url: 'https://cwwp2.dot.ca.gov/data/d2/cctv/image/i5castella/i5castella.jpg',
     format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true,
   },
   {
@@ -100,7 +100,7 @@ const COMPANY_CAMS: Cam[] = [
     state: 'Texas', country: 'US',
     description: 'T-47 · Forward-facing cab cam (Sofia Reyes)',
     lat: 30.27, lng: -97.74, direction: 'N',
-    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/us395conwaysummit.jpg',
+    url: 'https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggs/i57triggs.jpg',
     format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true,
   },
   {
@@ -109,7 +109,7 @@ const COMPANY_CAMS: Cam[] = [
     state: 'Texas', country: 'US',
     description: 'Aegis Yard · Round Rock (Loading Bay 3)',
     lat: 30.5083, lng: -97.8203, direction: 'W',
-    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/us6stateline.jpg',
+    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/us395conwaysummit.jpg',
     format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true,
   },
 ];
@@ -152,29 +152,58 @@ function useLiveImage(url: string, intervalMs: number, enabled: boolean) {
   const [src, setSrc] = useState<string | null>(null);
   const [err, setErr] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(0);
+  /** True if the last 2+ fetches returned byte-identical content — i.e. the
+   *  upstream camera is defunct or its image is server-side cached. */
+  const [stale, setStale] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const lastHashRef = useRef<string | null>(null);
+  const sameAsLastRef = useRef(0);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     setErr(false);
+    setStale(false);
     setSrc(null);
+    lastHashRef.current = null;
+    sameAsLastRef.current = 0;
 
     async function tick() {
       if (cancelled) return;
-      // Abort any in-flight request before starting a new one
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
       try {
         const res = await fetch(url, {
-          cache: 'no-store',        // critical: bypass HTTP cache
+          cache: 'no-store',
           signal: ac.signal,
           headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();
         if (cancelled) return;
+        // Lightweight hash (FNV-1a 32-bit) — fast, no crypto dep
+        const buf = await blob.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let h = 0x811c9dc5;
+        // Sample first 4 KB only — fast and collision-resistant for
+        // detecting identical images (false positives extremely rare)
+        const SAMPLE = 4096;
+        const len = Math.min(bytes.length, SAMPLE);
+        for (let i = 0; i < len; i++) {
+          h ^= bytes[i];
+          h = (h * 0x01000193) >>> 0;
+        }
+        const hash = h.toString(16) + ':' + bytes.length;
+        if (lastHashRef.current === hash) {
+          sameAsLastRef.current += 1;
+          // 2+ consecutive identical = upstream camera is dead
+          if (sameAsLastRef.current >= 2) setStale(true);
+        } else {
+          sameAsLastRef.current = 0;
+          setStale(false);
+        }
+        lastHashRef.current = hash;
         const objectUrl = URL.createObjectURL(blob);
         setSrc((prev) => {
           if (prev) URL.revokeObjectURL(prev);
@@ -194,7 +223,6 @@ function useLiveImage(url: string, intervalMs: number, enabled: boolean) {
       cancelled = true;
       clearInterval(iv);
       abortRef.current?.abort();
-      // Revoke the last object URL on unmount
       setSrc((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return null;
@@ -202,7 +230,7 @@ function useLiveImage(url: string, intervalMs: number, enabled: boolean) {
     };
   }, [url, intervalMs, enabled]);
 
-  return { src, err, lastUpdate };
+  return { src, err, stale, lastUpdate };
 }
 
 /** Drive-by event: a truck got close to a camera. */
@@ -231,8 +259,24 @@ export default function EmergencyCCTV({
   const [filterSource, setFilterSource] = useState<'all' | CamSource>('all');
   const [onlineOnly, setOnlineOnly] = useState(false);
   const [activeCamId, setActiveCamId] = useState<string | null>(null);
+  const [driveByEnabled, setDriveByEnabled] = useState<boolean>(true);
   const [driveBys, setDriveBys] = useState<DriveBy[]>([]);
   const lastNearestRef = useRef<{ truckId: string; camId: string | null } | null>(null);
+
+  // Persist drive-by toggle in localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const saved = localStorage.getItem('aegis.drive-by.enabled');
+      if (saved !== null) setDriveByEnabled(saved === '1');
+    } catch {}
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem('aegis.drive-by.enabled', driveByEnabled ? '1' : '0');
+    } catch {}
+  }, [driveByEnabled]);
 
   // ─── Effects ───────────────────────────────────────────────────
   useEffect(() => {
@@ -244,8 +288,9 @@ export default function EmergencyCCTV({
 
   // Drive-by detection: whenever the selected truck moves, check if it's
   // now within 500m of a DIFFERENT camera than the last nearest one.
+  // Skipped when driveByEnabled is false.
   useEffect(() => {
-    if (!selectedTruck) {
+    if (!selectedTruck || !driveByEnabled) {
       lastNearestRef.current = null;
       return;
     }
@@ -266,7 +311,7 @@ export default function EmergencyCCTV({
       }
     }
     lastNearestRef.current = { truckId: selectedTruck.id, camId: nearestId };
-  }, [selectedTruck?.id, selectedTruck?.lat, selectedTruck?.lng]);
+  }, [selectedTruck?.id, selectedTruck?.lat, selectedTruck?.lng, driveByEnabled]);
 
   // ─── Filter + sort ─────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -325,10 +370,27 @@ export default function EmergencyCCTV({
           <h3 className="text-[10px] uppercase tracking-[0.25em] text-slate-300 font-bold">
             Live CCTV
           </h3>
+          <span className="text-[8px] text-slate-500 font-mono normal-case tracking-normal ml-1">
+            (US cams refresh ~5min)
+          </span>
         </div>
-        <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          {summary ? `${summary.total.toLocaleString()} public cams` : 'loading...'}
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setDriveByEnabled(!driveByEnabled)}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] uppercase tracking-widest font-bold transition border ${
+              driveByEnabled
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_8px_rgba(251,191,36,0.2)]'
+                : 'bg-slate-900/40 text-slate-500 border-slate-800'
+            }`}
+            title={driveByEnabled ? 'Drive-by detection ON — click to disable' : 'Drive-by detection OFF — click to enable'}
+          >
+            <Power className="w-2.5 h-2.5" />
+            <span>Drive-by {driveByEnabled ? 'on' : 'off'}</span>
+          </button>
+          <span className="text-[10px] text-slate-500 font-mono">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            {summary ? `${summary.total.toLocaleString()} public cams` : 'loading...'}
+          </span>
         </div>
       </div>
 
@@ -432,7 +494,7 @@ export default function EmergencyCCTV({
                 errors={errors} setErrors={setErrors}
                 selectedTruck={selectedTruck}
                 onOpen={setActiveCamId}
-                intervalMs={4000}
+                intervalMs={300000}
               />
             ))}
           </div>
@@ -454,7 +516,7 @@ export default function EmergencyCCTV({
                 errors={errors} setErrors={setErrors}
                 selectedTruck={selectedTruck}
                 onOpen={setActiveCamId}
-                intervalMs={4000}
+                intervalMs={300000}
               />
             ))}
           </div>
@@ -483,7 +545,7 @@ export default function EmergencyCCTV({
             onNext={goNext}
             selectedTruck={selectedTruck}
             onOpenInGlobe={onOpenInGlobe}
-            intervalMs={3000}
+            intervalMs={300000}
           />
         )}
       </AnimatePresence>
@@ -502,8 +564,9 @@ function CamTile({
   onOpen: (id: string) => void;
   intervalMs: number;
 }) {
-  const { src, err, lastUpdate } = useLiveImage(cam.url, intervalMs, cam.directImage);
+  const { src, err, stale, lastUpdate } = useLiveImage(cam.url, intervalMs, cam.directImage);
   const isErr = err || errors[cam.id];
+  const isStale = stale && !isErr;
   const meta = SOURCE_META[cam.source];
   const distKm = selectedTruck ? haversineKm(selectedTruck, cam) : null;
   const secondsSinceUpdate = lastUpdate ? Math.round((Date.now() - lastUpdate) / 1000) : null;
@@ -554,11 +617,15 @@ function CamTile({
           </div>
         )}
 
-        {/* "Live" badge — flickers each refresh */}
+        {/* Live / stale / offline badge */}
         {lastUpdate && !isErr && (
-          <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/70 border border-emerald-500/40 text-[8px] font-mono text-emerald-300 flex items-center gap-1">
-            <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
-            <span>{secondsSinceUpdate !== null ? `${secondsSinceUpdate}s` : 'live'}</span>
+          <div className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/70 border text-[8px] font-mono flex items-center gap-1 ${
+            isStale
+              ? 'border-amber-500/40 text-amber-300'
+              : 'border-emerald-500/40 text-emerald-300'
+          }`}>
+            <span className={`w-1 h-1 rounded-full ${isStale ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
+            <span>{isStale ? 'stale' : (secondsSinceUpdate !== null ? `${secondsSinceUpdate}s` : 'live')}</span>
           </div>
         )}
       </div>
@@ -589,7 +656,7 @@ function CamModal({
   onOpenInGlobe?: (cam: { lat: number; lng: number; description: string }) => void;
   intervalMs: number;
 }) {
-  const { src, err, lastUpdate } = useLiveImage(cam.url, intervalMs, cam.directImage);
+  const { src, err, stale, lastUpdate } = useLiveImage(cam.url, intervalMs, cam.directImage);
   const isErr = err;
   const meta = SOURCE_META[cam.source];
   const distKm = selectedTruck ? haversineKm(selectedTruck, cam) : null;
@@ -684,11 +751,19 @@ function CamModal({
             </div>
           )}
 
-          {/* Live indicator — green pulse + seconds since update */}
+          {/* Live / stale indicator */}
           {!isErr && (
-            <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/70 border border-emerald-500/40 text-[9px] text-emerald-300 font-mono">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              LIVE · {intervalMs / 1000}s refresh
+            <div className={`absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/70 border text-[9px] font-mono ${
+              stale
+                ? 'border-amber-500/40 text-amber-300'
+                : 'border-emerald-500/40 text-emerald-300'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${stale ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
+              {stale ? 'STALE — upstream not updating' : (() => {
+                const sec = intervalMs / 1000;
+                const label = sec < 90 ? `${sec}s refresh` : `${sec / 60}min refresh`;
+                return `LIVE · ${label}`;
+              })()}
               {secondsSinceUpdate !== null && <span className="opacity-70">· {secondsSinceUpdate}s</span>}
             </div>
           )}
