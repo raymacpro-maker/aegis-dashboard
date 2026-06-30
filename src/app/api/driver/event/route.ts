@@ -94,6 +94,13 @@ export async function GET() {
       lng: 'number (location_update)',
       speed_mph: 'number (location_update)',
       heading: 'number (location_update)',
+      // GPS quality (Compass GnssMeasurement feed, send with location_update)
+      accuracy_m: 'number — horizontal accuracy, meters (e.g. 4.5). Lower = better. <10 green, 10-30 yellow, >30 red.',
+      satellites_used: 'number — sats in current fix (Android GnssMeasurement count of usedInFix=true). Typical 6-12.',
+      cn0_avg_dbhz: 'number — mean carrier-to-noise across used sats, dBHz. <25 degraded, <20 likely jammed.',
+      cn0_min_dbhz: 'number — worst Cn0 across used sats, dBHz. Single weak sat is suspect.',
+      spoofing_suspected: 'boolean — derived from clock drift + Cn0 anomaly. Driver should be alerted.',
+      fix_source: 'phone_gps|fmc003|fused — where the position came from.',
       spn: 'number (fault_event)',
       fmi: 'number (fault_event)',
       fault_code: 'SPN-XXX-FMI-X (fault_event)',

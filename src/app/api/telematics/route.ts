@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { getAllDrivers, getAllTrucks, getDriver, getTruck, maskDriver, type Role } from '@/lib/fleet-store';
+import { assessJamming, assessFleetJamming, type JammingAssessment } from '@/lib/jamming-detector';
 
 /**
  * Aegis Telematics — Fleet Operations API
@@ -36,9 +37,20 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'truck_not_found', truckId }, { status: 404 });
     }
     const driver = getDriver(truck.driverId);
+    const jammingZones = await fetchOsirisJammingZones().catch(() => []);
     return NextResponse.json({
       truck,
       driver: driver ? maskDriver(driver, role) : null,
+      gps_quality: {
+        accuracy_m: truck.location.accuracyM,
+        satellites_used: truck.location.satellitesUsed,
+        cn0_avg_dbhz: truck.location.cn0AvgDbhz,
+        cn0_min_dbhz: truck.location.cn0MinDbhz,
+        spoofing_suspected: truck.location.spoofingSuspected ?? false,
+        fix_source: truck.location.fixSource ?? 'unknown',
+        gnss_ts: truck.location.gnssTs,
+      },
+      jamming: assessJamming(truck, jammingZones),
       privacy: {
         role,
         driverNameMasked: role !== 'manager',
@@ -65,6 +77,9 @@ export async function GET(request: Request) {
   // Default: full fleet
   const allDrivers = getAllDrivers();
   const allTrucks = getAllTrucks();
+  const jammingZones = await fetchOsirisJammingZones().catch(() => []);
+  const jammingMap = assessFleetJamming(allTrucks, jammingZones);
+  const jammedCount = Object.values(jammingMap).filter((j) => j.in_jammed_area).length;
 
   const fleet: Fleet = {
     id: 'aegis-demo-fleet-001',
@@ -88,7 +103,9 @@ export async function GET(request: Request) {
       hosWarnings: allTrucks.filter((t) => t.hos.nextBreakRequiredIn < 0.5).length,
       lowFuel: allTrucks.filter((t) => t.fuel.levelPct < 0.25).length,
       dotInspectionsDueSoon: allTrucks.filter((t) => t.maintenance.daysUntilDOT < 14).length,
+      trucksInJammedArea: jammedCount,
     },
+    jamming: jammingMap,
     privacy: {
       role,
       driverNamesMasked: role !== 'manager',
@@ -97,6 +114,29 @@ export async function GET(request: Request) {
     },
     timestamp: new Date().toISOString(),
   });
+}
+
+/**
+ * Pull the current OSIRIS jamming zones from the same source as the /globe page.
+ * Cached briefly in-memory to avoid hammering /api/flights.
+ */
+let jammingCache: { zones: any[]; at: number } | null = null;
+const JAMMING_CACHE_MS = 30_000;
+async function fetchOsirisJammingZones(): Promise<any[]> {
+  if (jammingCache && Date.now() - jammingCache.at < JAMMING_CACHE_MS) {
+    return jammingCache.zones;
+  }
+  const base = process.env.AEGIS_INTERNAL_URL ?? 'http://127.0.0.1:3000';
+  try {
+    const res = await fetch(`${base}/api/flights`, { cache: 'no-store' });
+    if (!res.ok) return jammingCache?.zones ?? [];
+    const data = await res.json();
+    const zones = Array.isArray(data?.gps_jamming) ? data.gps_jamming : [];
+    jammingCache = { zones, at: Date.now() };
+    return zones;
+  } catch {
+    return jammingCache?.zones ?? [];
+  }
 }
 
 export async function POST(request: Request) {

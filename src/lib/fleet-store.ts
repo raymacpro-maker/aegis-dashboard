@@ -49,6 +49,20 @@ export type Truck = {
     address: string;
     speedMph: number;
     heading: number;
+    /** Horizontal accuracy in meters (Android `Location.getAccuracy()`). Lower = better. */
+    accuracyM?: number;
+    /** # of satellites used in current fix (Android `GnssMeasurement`). */
+    satellitesUsed?: number;
+    /** Mean carrier-to-noise across used sats, dBHz. <25 = degraded, <20 = likely jammed. */
+    cn0AvgDbhz?: number;
+    /** Worst Cn0 across used sats, dBHz. Single weak sat is suspect. */
+    cn0MinDbhz?: number;
+    /** Reported by Compass's GNSS anomaly detector (clock drift + Cn0 spikes). */
+    spoofingSuspected?: boolean;
+    /** Source of position fix — helps debug phone-only vs hardware-fed. */
+    fixSource?: 'phone_gps' | 'fmc003' | 'fused';
+    /** Unix ms of last GNSS update; useful for staleness checks. */
+    gnssTs?: number;
   };
   hos: {
     shiftStartTs: number;
@@ -95,6 +109,13 @@ export type DriverEvent = {
   fault_code?: string;
   fault_description?: string;
   fault_severity?: 'info' | 'warning' | 'critical';
+  // GPS quality (sent with location_update or duty_status_change)
+  accuracy_m?: number;
+  satellites_used?: number;
+  cn0_avg_dbhz?: number;
+  cn0_min_dbhz?: number;
+  spoofing_suspected?: boolean;
+  fix_source?: 'phone_gps' | 'fmc003' | 'fused';
   // Misc
   fuel_level_pct?: number;
   notes?: string;
@@ -258,6 +279,13 @@ export function applyDriverEvent(evt: DriverEvent): EventResult {
       if (typeof evt.lat === 'number') truck.location.lat = evt.lat;
       if (typeof evt.lng === 'number') truck.location.lng = evt.lng;
       if (typeof evt.heading === 'number') truck.location.heading = evt.heading;
+      // GPS quality (when bundled with the duty change)
+      if (typeof evt.accuracy_m === 'number') truck.location.accuracyM = evt.accuracy_m;
+      if (typeof evt.satellites_used === 'number') truck.location.satellitesUsed = evt.satellites_used;
+      if (typeof evt.cn0_avg_dbhz === 'number') truck.location.cn0AvgDbhz = evt.cn0_avg_dbhz;
+      if (typeof evt.cn0_min_dbhz === 'number') truck.location.cn0MinDbhz = evt.cn0_min_dbhz;
+      if (typeof evt.spoofing_suspected === 'boolean') truck.location.spoofingSuspected = evt.spoofing_suspected;
+      if (evt.fix_source) truck.location.fixSource = evt.fix_source;
       if (d === 'DRIVING' && truck.hos.hoursDriven === 0) {
         // Fresh shift start
         truck.hos.shiftStartTs = ts;
@@ -278,6 +306,14 @@ export function applyDriverEvent(evt: DriverEvent): EventResult {
         truck.status = evt.speed_mph < 2 ? 'idle' : 'moving';
       }
       if (typeof evt.heading === 'number') truck.location.heading = evt.heading;
+      // GPS quality fields
+      if (typeof evt.accuracy_m === 'number') truck.location.accuracyM = evt.accuracy_m;
+      if (typeof evt.satellites_used === 'number') truck.location.satellitesUsed = evt.satellites_used;
+      if (typeof evt.cn0_avg_dbhz === 'number') truck.location.cn0AvgDbhz = evt.cn0_avg_dbhz;
+      if (typeof evt.cn0_min_dbhz === 'number') truck.location.cn0MinDbhz = evt.cn0_min_dbhz;
+      if (typeof evt.spoofing_suspected === 'boolean') truck.location.spoofingSuspected = evt.spoofing_suspected;
+      if (evt.fix_source) truck.location.fixSource = evt.fix_source;
+      if (typeof evt.ts === 'number') truck.location.gnssTs = evt.ts;
       break;
     }
 
