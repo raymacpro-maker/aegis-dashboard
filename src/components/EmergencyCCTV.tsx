@@ -21,67 +21,16 @@ type Cam = {
   url: string;
   format: 'IMAGE_STREAM' | 'M3U8' | 'IFRAME' | 'MP4';
   encoding?: string;
-  /** True if the URL is verified to return 200 as a direct image (works in <img>). */
+  /** True if the URL is verified to return 200 as a direct image (works in <img>).
+   *  False for HLS streams that need <video> + hls.js. */
   directImage: boolean;
+  /** District 1–12 (Caltrans only). */
+  district?: number;
+  /** Has an HLS streamingVideoURL (live video, frame-accurate to ~2-3s). */
+  hasLiveStream?: boolean;
+  /** Refresh interval in minutes (from Caltrans `currentImageUpdateFrequency`). */
+  refreshMin?: number;
 };
-
-// ── PUBLIC cameras (verified working direct-image feeds) ─────────────
-const PUBLIC_CAMS: Cam[] = [
-  {
-    id: 'pub-sr203-mammoth',
-    source: 'public',
-    state: 'California', country: 'US',
-    description: 'SR-203 · Mammoth Mountain',
-    lat: 37.64111, lng: -118.91848, direction: 'N',
-    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/sr203mammothmountain/sr203mammothmountain.jpg',
-    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true,
-  },
-  {
-    id: 'pub-us395-conway',
-    source: 'public',
-    state: 'California', country: 'US',
-    description: 'US-395 · Conway Summit',
-    lat: 38.08782, lng: -119.181251, direction: 'N',
-    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/us395conwaysummit.jpg',
-    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true,
-  },
-  {
-    id: 'pub-us6-stateline',
-    source: 'public',
-    state: 'California', country: 'US',
-    description: 'US-6 · State Line',
-    lat: 37.84225, lng: -118.47842, direction: 'E',
-    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/us6stateline.jpg',
-    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true,
-  },
-  {
-    id: 'pub-us395-crestview',
-    source: 'public',
-    state: 'California', country: 'US',
-    description: 'US-395 · Crestview',
-    lat: 37.75146, lng: -118.98329, direction: 'N',
-    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395crestview/us395crestview.jpg',
-    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true,
-  },
-  {
-    id: 'pub-i80-donner',
-    source: 'public',
-    state: 'California', country: 'US',
-    description: 'I-80 · Donner Pass',
-    lat: 39.3163, lng: -120.3300, direction: 'W',
-    url: 'https://cwwp2.dot.ca.gov/data/d3/cctv/image/i80donnerpass/i80donnerpass.jpg',
-    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true,
-  },
-  {
-    id: 'pub-i5-castella',
-    source: 'public',
-    state: 'California', country: 'US',
-    description: 'I-5 · Castella',
-    lat: 41.1394, lng: -122.3097, direction: 'N',
-    url: 'https://cwwp2.dot.ca.gov/data/d2/cctv/image/i5castella/i5castella.jpg',
-    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true,
-  },
-];
 
 // ── COMPANY cameras (placeholder until Compass streams are wired) ───
 const COMPANY_CAMS: Cam[] = [
@@ -93,6 +42,7 @@ const COMPANY_CAMS: Cam[] = [
     lat: 30.2672, lng: -97.7431, direction: 'S',
     url: 'https://cwwp2.dot.ca.gov/data/d2/cctv/image/i5castella/i5castella.jpg',
     format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true,
+    refreshMin: 5,
   },
   {
     id: 'co-t47-cab',
@@ -111,10 +61,74 @@ const COMPANY_CAMS: Cam[] = [
     lat: 30.5083, lng: -97.8203, direction: 'W',
     url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/us395conwaysummit.jpg',
     format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true,
+    refreshMin: 5,
   },
 ];
 
-const ALL_CAMS = [...PUBLIC_CAMS, ...COMPANY_CAMS];
+// Seed list of Caltrans cams to show instantly while the full feed loads.
+// (Replaced at runtime by /api/caltrans-cams)
+const SEED_PUBLIC_CAMS: Cam[] = [
+  {
+    id: 'pub-sr203-mammoth', source: 'public',
+    state: 'California', country: 'US',
+    description: 'SR-203 · Mammoth Mountain',
+    lat: 37.64111, lng: -118.91848, direction: 'N',
+    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/sr203mammothmountain/sr203mammothmountain.jpg',
+    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true, refreshMin: 5, district: 9,
+  },
+  {
+    id: 'pub-us395-conway', source: 'public',
+    state: 'California', country: 'US',
+    description: 'US-395 · Conway Summit',
+    lat: 38.08782, lng: -119.181251, direction: 'N',
+    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/us395conwaysummit.jpg',
+    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true, refreshMin: 5, district: 9,
+  },
+  {
+    id: 'pub-us6-stateline', source: 'public',
+    state: 'California', country: 'US',
+    description: 'US-6 · State Line',
+    lat: 37.84225, lng: -118.47842, direction: 'E',
+    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/us6stateline.jpg',
+    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true, refreshMin: 5, district: 9,
+  },
+  {
+    id: 'pub-us395-crestview', source: 'public',
+    state: 'California', country: 'US',
+    description: 'US-395 · Crestview',
+    lat: 37.75146, lng: -118.98329, direction: 'N',
+    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395crestview/us395crestview.jpg',
+    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true, refreshMin: 5, district: 9,
+  },
+  {
+    id: 'pub-i80-donner', source: 'public',
+    state: 'California', country: 'US',
+    description: 'I-80 · Donner Pass',
+    lat: 39.3163, lng: -120.3300, direction: 'W',
+    url: 'https://cwwp2.dot.ca.gov/data/d3/cctv/image/i80donnerpass/i80donnerpass.jpg',
+    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true, refreshMin: 5, district: 3,
+  },
+  {
+    id: 'pub-i5-castella', source: 'public',
+    state: 'California', country: 'US',
+    description: 'I-5 · Castella',
+    lat: 41.1394, lng: -122.3097, direction: 'N',
+    url: 'https://cwwp2.dot.ca.gov/data/d2/cctv/image/i5castella/i5castella.jpg',
+    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true, refreshMin: 5, district: 2,
+  },
+  {
+    id: 'pub-i5-triggs', source: 'public',
+    state: 'California', country: 'US',
+    description: 'I-5 · Triggs',
+    lat: 34.05, lng: -118.24, direction: 'N',
+    url: 'https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggs/i57triggs.jpg',
+    format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true, refreshMin: 5, district: 7,
+  },
+];
+
+// In-component state is initialised with the seed; the real feed replaces it
+// once /api/caltrans-cams returns. Callers no longer use ALL_CAMS as a
+// static list.
 
 type FleetCoord = { id: string; lat: number; lng: number } | null;
 
@@ -233,6 +247,47 @@ function useLiveImage(url: string, intervalMs: number, enabled: boolean) {
   return { src, err, stale, lastUpdate };
 }
 
+/**
+ * useHlsStream — plays an HLS .m3u8 URL in a <video> tag.
+ * Uses native HLS on Safari/iOS, hls.js on Chrome/Firefox/Edge.
+ */
+function useHlsStream(url: string, enabled: boolean) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    if (!enabled) return;
+    const video = videoRef.current;
+    if (!video) return;
+    let hls: import('hls.js').default | null = null;
+    setErr(false);
+    const isHlsNative = video.canPlayType('application/vnd.apple.mpegurl') !== '';
+    if (isHlsNative) {
+      video.src = url;
+    } else {
+      // dynamic import so hls.js doesn't bloat SSR bundle
+      import('hls.js').then((mod) => {
+        const Hls = mod.default;
+        if (Hls.isSupported()) {
+          hls = new Hls({ liveSyncDurationCount: 3, maxBufferLength: 10 });
+          hls.loadSource(url);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.ERROR, (_e, data) => {
+            if (data.fatal) setErr(true);
+          });
+        } else {
+          setErr(true);
+        }
+      }).catch(() => setErr(true));
+    }
+    return () => {
+      hls?.destroy();
+      if (video) video.removeAttribute('src');
+    };
+  }, [url, enabled]);
+  return { videoRef, err };
+}
+
+
 /** Drive-by event: a truck got close to a camera. */
 type DriveBy = {
   id: string;
@@ -254,13 +309,16 @@ export default function EmergencyCCTV({
 }) {
   // ─── State ──────────────────────────────────────────────────────
   const [errors, setErrors] = useState<Record<string, boolean>>({});
-  const [summary, setSummary] = useState<{ total: number; byState: Record<string, number> } | null>(null);
+  const [summary, setSummary] = useState<{ total: number; byState: Record<string, number>; withLiveStream: number; fetchedAt: number } | null>(null);
   const [search, setSearch] = useState('');
   const [filterSource, setFilterSource] = useState<'all' | CamSource>('all');
   const [onlineOnly, setOnlineOnly] = useState(false);
+  const [liveOnly, setLiveOnly] = useState(false);
   const [activeCamId, setActiveCamId] = useState<string | null>(null);
   const [driveByEnabled, setDriveByEnabled] = useState<boolean>(true);
   const [driveBys, setDriveBys] = useState<DriveBy[]>([]);
+  const [publicCams, setPublicCams] = useState<Cam[]>(SEED_PUBLIC_CAMS);
+  const [caltransLoading, setCaltransLoading] = useState(false);
   const lastNearestRef = useRef<{ truckId: string; camId: string | null } | null>(null);
 
   // Persist drive-by toggle in localStorage
@@ -278,13 +336,56 @@ export default function EmergencyCCTV({
     } catch {}
   }, [driveByEnabled]);
 
-  // ─── Effects ───────────────────────────────────────────────────
+  // Fetch the full Caltrans CCTV catalogue from /api/caltrans-cams
   useEffect(() => {
-    fetch('/api/cameras?summary=1')
-      .then((r) => r.json())
-      .then((d) => setSummary({ total: d.total, byState: d.byState }))
-      .catch(() => {});
+    let cancelled = false;
+    (async () => {
+      setCaltransLoading(true);
+      try {
+        const res = await fetch('/api/caltrans-cams');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const fetched: Cam[] = (data.cams || []).map((c: {
+          id: string; description: string; lat: number; lng: number; direction: string;
+          state: string; country: string; url: string; format: 'IMAGE_STREAM' | 'M3U8';
+          encoding: string; refreshMin: number; district: number; hasLiveStream: boolean;
+        }) => ({
+          id: c.id,
+          source: 'public' as const,
+          state: c.state,
+          country: c.country,
+          description: c.description,
+          lat: c.lat,
+          lng: c.lng,
+          direction: c.direction,
+          url: c.url,
+          format: c.format,
+          encoding: c.encoding,
+          // JPEG: direct image. HLS: needs <video> + hls.js (not direct).
+          directImage: c.format === 'IMAGE_STREAM',
+          district: c.district,
+          hasLiveStream: c.hasLiveStream,
+          refreshMin: c.refreshMin,
+        }));
+        if (fetched.length > 0) setPublicCams(fetched);
+        setSummary({
+          total: data.total || 0,
+          byState: { California: data.total || 0 },
+          withLiveStream: data.withLiveStream || 0,
+          fetchedAt: data.fetchedAt || 0,
+        });
+      } catch (e) {
+        // keep seed if API fails
+      } finally {
+        if (!cancelled) setCaltransLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
+
+  // ─── Effects ───────────────────────────────────────────────────
+  // (summary is set by the /api/caltrans-cams fetch below)
 
   // Drive-by detection: whenever the selected truck moves, check if it's
   // now within 500m of a DIFFERENT camera than the last nearest one.
@@ -296,13 +397,13 @@ export default function EmergencyCCTV({
     }
     let nearestId: string | null = null;
     let nearestDist = Infinity;
-    for (const cam of ALL_CAMS) {
+    for (const cam of allCams) {
       const d = haversineKm(selectedTruck, cam);
       if (d < nearestDist) { nearestDist = d; nearestId = cam.id; }
     }
     const last = lastNearestRef.current;
     if (last && last.truckId === selectedTruck.id && nearestId && nearestId !== last.camId && nearestDist < 0.5) {
-      const cam = ALL_CAMS.find((c) => c.id === nearestId);
+      const cam = allCams.find((c) => c.id === nearestId);
       if (cam) {
         setDriveBys((prev) => [
           { id: `${Date.now()}-${selectedTruck.id}-${nearestId}`, truckId: selectedTruck.id, camId: nearestId, camDescription: cam.description, ts: Date.now(), distanceKm: nearestDist },
@@ -313,12 +414,16 @@ export default function EmergencyCCTV({
     lastNearestRef.current = { truckId: selectedTruck.id, camId: nearestId };
   }, [selectedTruck?.id, selectedTruck?.lat, selectedTruck?.lng, driveByEnabled]);
 
+  // ─── Combined cam list (public from API + company static) ───────
+  const allCams = useMemo(() => [...publicCams, ...COMPANY_CAMS], [publicCams]);
+
   // ─── Filter + sort ─────────────────────────────────────────────
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return ALL_CAMS.filter((c) => {
+    return allCams.filter((c) => {
       if (filterSource !== 'all' && c.source !== filterSource) return false;
       if (onlineOnly && errors[c.id]) return false;
+      if (liveOnly && !c.hasLiveStream) return false;
       if (q) {
         const hay = `${c.description} ${c.state} ${c.country ?? ''} ${c.format}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -332,11 +437,11 @@ export default function EmergencyCCTV({
       }
       return 0;
     });
-  }, [search, filterSource, onlineOnly, errors, selectedTruck]);
+  }, [search, filterSource, onlineOnly, liveOnly, errors, selectedTruck]);
 
-  const publicCams = filtered.filter((c) => c.source === 'public');
-  const companyCams = filtered.filter((c) => c.source === 'company');
-  const activeCam = activeCamId ? ALL_CAMS.find((c) => c.id === activeCamId) : null;
+  const publicCamsFiltered = filtered.filter((c) => c.source === 'public');
+  const companyCamsFiltered = filtered.filter((c) => c.source === 'company');
+  const activeCam = activeCamId ? allCams.find((c) => c.id === activeCamId) : null;
   const activeCamIndex = activeCam ? filtered.indexOf(activeCam) : -1;
 
   // ─── Modal navigation ──────────────────────────────────────────
@@ -387,9 +492,21 @@ export default function EmergencyCCTV({
             <Power className="w-2.5 h-2.5" />
             <span>Drive-by {driveByEnabled ? 'on' : 'off'}</span>
           </button>
-          <span className="text-[10px] text-slate-500 font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            {summary ? `${summary.total.toLocaleString()} public cams` : 'loading...'}
+          <span className="text-[10px] text-slate-500 font-mono flex items-center gap-1.5">
+            {caltransLoading ? (
+              <>
+                <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                <span>loading...</span>
+              </>
+            ) : summary ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>{summary.total.toLocaleString()} cams</span>
+                {summary.withLiveStream > 0 && (
+                  <span className="text-rose-400">· {summary.withLiveStream} live</span>
+                )}
+              </>
+            ) : null}
           </span>
         </div>
       </div>
@@ -416,11 +533,11 @@ export default function EmergencyCCTV({
               : 'bg-slate-900/40 text-slate-500 border-slate-800 hover:text-slate-300'
           }`}
         >
-          All ({ALL_CAMS.length})
+          All ({allCams.length})
         </button>
         {(['public', 'company'] as CamSource[]).map((s) => {
           const m = SOURCE_META[s];
-          const cnt = ALL_CAMS.filter((c) => c.source === s).length;
+          const cnt = allCams.filter((c) => c.source === s).length;
           const isActive = filterSource === s;
           return (
             <button
@@ -438,6 +555,20 @@ export default function EmergencyCCTV({
             </button>
           );
         })}
+        {allCams.filter((c) => c.hasLiveStream).length > 0 && (
+          <button
+            onClick={() => setLiveOnly(!liveOnly)}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] uppercase tracking-widest font-bold transition border ${
+              liveOnly
+                ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                : 'bg-slate-900/40 text-rose-400/60 border-rose-500/20 hover:text-rose-300'
+            }`}
+            title="Show only cameras with live HLS streams"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+            <span>live · {allCams.filter((c) => c.hasLiveStream).length}</span>
+          </button>
+        )}
         <button
           onClick={() => setOnlineOnly(!onlineOnly)}
           className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] uppercase tracking-widest font-bold transition border ml-auto ${
@@ -480,15 +611,15 @@ export default function EmergencyCCTV({
       )}
 
       {/* Public section */}
-      {publicCams.length > 0 && (
+      {publicCamsFiltered.length > 0 && (
         <div className="mb-3">
           <div className="flex items-center gap-1.5 mb-1.5">
             <Globe className="w-3 h-3 text-cyan-400" />
             <span className="text-[9px] uppercase tracking-widest font-bold text-cyan-300">Public · Caltrans</span>
-            <span className="text-[9px] text-slate-500">({publicCams.length})</span>
+            <span className="text-[9px] text-slate-500">({publicCamsFiltered.length})</span>
           </div>
           <div className="grid grid-cols-2 gap-1.5">
-            {publicCams.map((cam) => (
+            {publicCamsFiltered.map((cam) => (
               <CamTile
                 key={cam.id} cam={cam}
                 errors={errors} setErrors={setErrors}
@@ -502,15 +633,15 @@ export default function EmergencyCCTV({
       )}
 
       {/* Company section */}
-      {companyCams.length > 0 && (
+      {companyCamsFiltered.length > 0 && (
         <div className="mb-2">
           <div className="flex items-center gap-1.5 mb-1.5">
             <Building2 className="w-3 h-3 text-amber-400" />
             <span className="text-[9px] uppercase tracking-widest font-bold text-amber-300">Company · Aegis</span>
-            <span className="text-[9px] text-slate-500">({companyCams.length})</span>
+            <span className="text-[9px] text-slate-500">({companyCamsFiltered.length})</span>
           </div>
           <div className="grid grid-cols-2 gap-1.5">
-            {companyCams.map((cam) => (
+            {companyCamsFiltered.map((cam) => (
               <CamTile
                 key={cam.id} cam={cam}
                 errors={errors} setErrors={setErrors}
@@ -565,7 +696,8 @@ function CamTile({
   intervalMs: number;
 }) {
   const { src, err, stale, lastUpdate } = useLiveImage(cam.url, intervalMs, cam.directImage);
-  const isErr = err || errors[cam.id];
+  const { videoRef, err: hlsErr } = useHlsStream(cam.url, cam.format === 'M3U8' && cam.directImage === false);
+  const isErr = err || errors[cam.id] || hlsErr;
   const isStale = stale && !isErr;
   const meta = SOURCE_META[cam.source];
   const distKm = selectedTruck ? haversineKm(selectedTruck, cam) : null;
@@ -585,6 +717,16 @@ function CamTile({
           <div className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-500">
             <WifiOff className="w-3 h-3 mr-1" /> offline
           </div>
+        ) : cam.format === 'M3U8' ? (
+          // HLS live stream
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            controls={false}
+            className="w-full h-full object-cover"
+          />
         ) : src ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -618,7 +760,7 @@ function CamTile({
         )}
 
         {/* Live / stale / offline badge */}
-        {lastUpdate && !isErr && (
+        {lastUpdate && !isErr && cam.format !== 'M3U8' && (
           <div className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/70 border text-[8px] font-mono flex items-center gap-1 ${
             isStale
               ? 'border-amber-500/40 text-amber-300'
@@ -626,6 +768,13 @@ function CamTile({
           }`}>
             <span className={`w-1 h-1 rounded-full ${isStale ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
             <span>{isStale ? 'stale' : (secondsSinceUpdate !== null ? `${secondsSinceUpdate}s` : 'live')}</span>
+          </div>
+        )}
+        {/* HLS stream badge — always shown when the cam has a live stream */}
+        {cam.format === 'M3U8' && !isErr && (
+          <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/70 border border-rose-500/40 text-[8px] font-mono flex items-center gap-1 text-rose-300">
+            <span className="w-1 h-1 rounded-full bg-rose-400 animate-pulse" />
+            <span>STREAM</span>
           </div>
         )}
       </div>
@@ -657,7 +806,15 @@ function CamModal({
   intervalMs: number;
 }) {
   const { src, err, stale, lastUpdate } = useLiveImage(cam.url, intervalMs, cam.directImage);
-  const isErr = err;
+  const { videoRef, err: hlsErr } = useHlsStream(cam.url, cam.format === 'M3U8' && cam.directImage === false);
+  const isErr = err || hlsErr;
+  // Human-readable live label (avoids JSX parser confusion with nested ternaries)
+  const liveLabel = useMemo(() => {
+    if (stale) return 'STALE \xe2\x80\x94 upstream not updating';
+    if (cam.format === 'M3U8') return 'LIVE \xc2\xb7 HLS stream';
+    const sec = intervalMs / 1000;
+    return 'LIVE \xc2\xb7 ' + (sec < 90 ? sec + 's refresh' : (sec / 60) + 'min refresh');
+  }, [stale, cam.format, intervalMs]);
   const meta = SOURCE_META[cam.source];
   const distKm = selectedTruck ? haversineKm(selectedTruck, cam) : null;
   const secondsSinceUpdate = lastUpdate ? Math.round((Date.now() - lastUpdate) / 1000) : null;
@@ -737,6 +894,15 @@ function CamModal({
                 <div>Camera offline</div>
               </div>
             </div>
+          ) : cam.format === 'M3U8' ? (
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              controls
+              className="w-full h-full object-contain"
+            />
           ) : src ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -759,11 +925,7 @@ function CamModal({
                 : 'border-emerald-500/40 text-emerald-300'
             }`}>
               <span className={`w-1.5 h-1.5 rounded-full ${stale ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
-              {stale ? 'STALE — upstream not updating' : (() => {
-                const sec = intervalMs / 1000;
-                const label = sec < 90 ? `${sec}s refresh` : `${sec / 60}min refresh`;
-                return `LIVE · ${label}`;
-              })()}
+              {stale ? 'STALE — upstream not updating' : (cam.format === 'M3U8' ? 'LIVE · HLS stream' : liveLabel)}
               {secondsSinceUpdate !== null && <span className="opacity-70">· {secondsSinceUpdate}s</span>}
             </div>
           )}

@@ -64,7 +64,7 @@ async function fetchWSDOTCameras(): Promise<any[]> {
 
 // ── US-WEST: Caltrans California Districts ──
 async function fetchCaltransCameras(): Promise<any[]> {
-  const dists = ['d03', 'd04', 'd05', 'd06', 'd07', 'd08', 'd10', 'd11', 'd12'];
+  const dists = ['d01', 'd02', 'd03', 'd04', 'd05', 'd06', 'd07', 'd08', 'd09', 'd10', 'd11', 'd12'];
   const results = await Promise.allSettled(dists.map(async (dist) => {
     const res = await fetch(`https://cwwp2.dot.ca.gov/data/${dist}/cctv/cctvStatus${dist.toUpperCase()}.json`, { signal: AbortSignal.timeout(8000), cache: 'no-store' });
     if (!res.ok) return [];
@@ -73,9 +73,25 @@ async function fetchCaltransCameras(): Promise<any[]> {
     for (const cam of (data?.data || [])) {
       const lat = parseFloat(cam.cctv?.location?.latitude || cam.location?.latitude);
       const lng = parseFloat(cam.cctv?.location?.longitude || cam.location?.longitude);
-      const url = cam.cctv?.imageData?.static?.currentImageURL;
-      if (!lat || !lng || !url) continue;
-      distCams.push({ id: `cal-${Math.random().toString(36).substr(2,9)}`, lat, lng, name: cam.cctv?.location?.locationName || cam.location?.locationName || 'Caltrans', city: 'California', country: 'US', feed_url: url, source: 'Caltrans' });
+      const jpgUrl = cam.cctv?.imageData?.static?.currentImageURL;
+      const hlsUrl = cam.cctv?.imageData?.streamingVideoURL;
+      if (!lat || !lng) continue;
+      // Prefer HLS (live video) over JPEG (5-min refresh) when both exist
+      const feedUrl = hlsUrl
+        ? `/api/caltrans-hls-proxy?url=${encodeURIComponent(hlsUrl)}`
+        : (jpgUrl || '');
+      if (!feedUrl) continue;
+      distCams.push({
+        id: `cal-${dist}-${cam.cctv?.index || Math.random().toString(36).substr(2, 6)}`,
+        lat, lng,
+        name: cam.cctv?.location?.locationName || cam.location?.locationName || 'Caltrans',
+        city: cam.cctv?.location?.nearbyPlace || cam.cctv?.location?.county || 'California',
+        country: 'US',
+        feed_url: feedUrl,
+        stream_url: hlsUrl || '',
+        stream_type: hlsUrl ? 'hls' : 'image',
+        source: 'Caltrans',
+      });
     }
     return distCams;
   }));

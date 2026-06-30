@@ -29,7 +29,7 @@ const DEFAULT_LAYERS: Record<string, boolean> = {
   aegis_fleet: true,
   // OSIRIS feeds on for the fleet-ops demo
   fires: true,
-  cctv: false,           // 6,971 dots would clutter; user can toggle
+  cctv: true,            // 3,304 Caltrans cameras, 2,089 with live HLS streams
   maritime: true,
   flights: false,        // 1000+ would clutter; user can toggle
   earthquakes: true,
