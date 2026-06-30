@@ -35,7 +35,19 @@ type TruckData = {
   id: string;
   status: 'moving' | 'idle' | 'maintenance' | 'offline';
   driverId: string;
-  location: { lat: number; lng: number; address: string; speedMph: number };
+  location: {
+    lat: number;
+    lng: number;
+    address: string;
+    speedMph: number;
+    accuracyM?: number;
+    cn0AvgDbhz?: number;
+    cn0MinDbhz?: number;
+    satellitesUsed?: number;
+    spoofingSuspected?: boolean;
+    fixSource?: 'phone_gps' | 'fmc003' | 'fused';
+    gnssTs?: number;
+  };
   hos: {
     hoursDriven: number;
     hoursOnDuty: number;
@@ -59,6 +71,7 @@ type FleetSummary = {
   hosWarnings: number;
   lowFuel: number;
   dotInspectionsDueSoon: number;
+  trucksInJammedArea?: number;
 };
 
 type Driver = { id: string; name: string; nameEncrypted?: boolean; homeBase: string; cdlNumber?: string; phone?: string; hireDate?: string };
@@ -66,6 +79,7 @@ type Driver = { id: string; name: string; nameEncrypted?: boolean; homeBase: str
 export default function AegisDashboard() {
   const [summary, setSummary] = useState<FleetSummary | null>(null);
   const [trucks, setTrucks] = useState<TruckData[]>([]);
+  const [jammingMap, setJammingMap] = useState<Record<string, { level: string; severity: number; reason: string; in_jammed_area: boolean }>>({});
   const [drivers, setDrivers] = useState<Record<string, Driver>>({});
   const [selectedTruck, setSelectedTruck] = useState<string | null>('T-22');
   const [chatOpen, setChatOpen] = useState(false);
@@ -85,6 +99,7 @@ export default function AegisDashboard() {
         const data = await r.json();
         setSummary(data.summary);
         setTrucks(data.fleet.trucks);
+        if (data.jamming) setJammingMap(data.jamming);
         const driverMap: Record<string, Driver> = {};
         for (const d of data.fleet.drivers) driverMap[d.id] = d;
         setDrivers(driverMap);
@@ -238,6 +253,21 @@ export default function AegisDashboard() {
                 <Stat label="Idle" value={summary.idle} color="amber" />
                 <Stat label="Service" value={summary.maintenance} color="blue" />
                 <Stat label="Offline" value={summary.offline} color="slate" />
+                {(summary.trucksInJammedArea ?? 0) > 0 && (
+                  <Stat
+                    label="GPS Issues"
+                    value={summary.trucksInJammedArea ?? 0}
+                    color="red"
+                  />
+                )}
+              </div>
+            )}
+            {summary && (summary.trucksInJammedArea ?? 0) > 0 && (
+              <div className="mx-2 mb-2 px-3 py-2 rounded border border-red-500/40 bg-red-500/10 text-[11px] text-red-200">
+                <span className="font-bold uppercase tracking-widest text-red-300">⚠ GPS Alert</span>
+                <span className="ml-2 text-red-100/80">
+                  {summary.trucksInJammedArea} truck{summary.trucksInJammedArea === 1 ? '' : 's'} reporting degraded or spoofed GNSS — open detail panel for diagnosis.
+                </span>
               </div>
             )}
           </div>
@@ -367,6 +397,64 @@ export default function AegisDashboard() {
                   sub={sel.status === 'maintenance' ? 'in service bay' : `${sel.fuel.mpgRecent.toFixed(1)} mpg recent`}
                   color="blue"
                 />
+              </div>
+
+              {/* GPS Quality + Jamming cross-reference (Aegis wedge: phone GNSS + ADS-B) */}
+              <div className="mb-6 p-4 rounded border border-slate-800 bg-slate-900/50">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-[10px] uppercase tracking-[0.25em] text-slate-500 font-bold">
+                    GPS Quality + Jamming
+                  </h3>
+                  {(() => {
+                    const j = jammingMap[sel.id];
+                    if (!j) return null;
+                    const colorClass =
+                      j.level === 'direct' ? 'text-red-400 border-red-500/40 bg-red-500/10' :
+                      j.level === 'probable' ? 'text-orange-400 border-orange-500/40 bg-orange-500/10' :
+                      j.level === 'possible' ? 'text-amber-400 border-amber-500/40 bg-amber-500/10' :
+                      'text-emerald-400 border-emerald-500/30 bg-emerald-500/10';
+                    return (
+                      <span className={`px-2 py-0.5 rounded text-[10px] uppercase tracking-widest font-bold border ${colorClass}`}>
+                        {j.level === 'none' ? 'Clear' : j.level}
+                      </span>
+                    );
+                  })()}
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <div className="text-slate-500 text-[10px] uppercase tracking-widest mb-1">Accuracy</div>
+                    <div className="font-mono text-slate-200">
+                      {typeof sel.location.accuracyM === 'number' ? `${sel.location.accuracyM.toFixed(0)} m` : '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-slate-500 text-[10px] uppercase tracking-widest mb-1">Cn0 avg</div>
+                    <div className={`font-mono ${
+                      typeof sel.location.cn0AvgDbhz === 'number' && sel.location.cn0AvgDbhz < 20
+                        ? 'text-rose-400' : 'text-slate-200'
+                    }`}>
+                      {typeof sel.location.cn0AvgDbhz === 'number' ? `${sel.location.cn0AvgDbhz.toFixed(0)} dBHz` : '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-slate-500 text-[10px] uppercase tracking-widest mb-1">Fix source</div>
+                    <div className="font-mono text-slate-200 capitalize">
+                      {sel.location.fixSource ?? 'unknown'}
+                    </div>
+                  </div>
+                </div>
+                {jammingMap[sel.id]?.level !== 'none' && jammingMap[sel.id]?.reason && (
+                  <div className="mt-3 p-2 rounded bg-slate-950/50 border border-slate-800 text-xs text-slate-300">
+                    <span className="text-slate-500 text-[10px] uppercase tracking-widest font-bold mr-2">Reason</span>
+                    {jammingMap[sel.id].reason}
+                  </div>
+                )}
+                {typeof sel.location.spoofingSuspected === 'boolean' && sel.location.spoofingSuspected && (
+                  <div className="mt-3 px-3 py-2 rounded bg-red-500/15 border border-red-500/40 text-xs text-red-200 flex items-center gap-2">
+                    <span className="text-red-400 font-bold uppercase tracking-widest">⚠ Spoofing</span>
+                    Driver phone reports GNSS anomaly. Confirm with FMC003 readings and pull over if route deviation.
+                  </div>
+                )}
               </div>
 
               {/* Faults */}
@@ -685,13 +773,14 @@ function Stat({
 }: {
   label: string;
   value: number;
-  color: 'emerald' | 'amber' | 'blue' | 'slate';
+  color: 'emerald' | 'amber' | 'blue' | 'slate' | 'red';
 }) {
   const colorMap: Record<string, string> = {
     emerald: 'text-emerald-400',
     amber: 'text-amber-400',
     blue: 'text-blue-400',
     slate: 'text-slate-500',
+    red: 'text-red-400',
   };
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded p-2">
@@ -797,6 +886,17 @@ function FleetMap({
     offline: '#64748b',
   };
 
+  // GPS quality overrides status when accuracy is degraded or spoofing is suspected.
+  // This is the Aegis wedge — Samsara/Motive/Geotab never see this signal.
+  const gpsColor = (t: Truck): string | null => {
+    const loc = t.location;
+    if (loc.spoofingSuspected) return '#dc2626'; // red — direct spoofing
+    if (typeof loc.cn0AvgDbhz === 'number' && loc.cn0AvgDbhz < 20) return '#f43f5e'; // rose — degraded GNSS
+    if (typeof loc.accuracyM === 'number' && loc.accuracyM > 30) return '#eab308'; // yellow — marginal accuracy
+    return null;
+  };
+  const dotColor = (t: Truck) => gpsColor(t) ?? statusColor[t.status] ?? '#64748b';
+
   return (
     <div className="w-full h-full relative">
       <svg viewBox="0 0 100 100" className="w-full h-full" preserveAspectRatio="none">
@@ -824,13 +924,20 @@ function FleetMap({
         {trucks.map((t) => {
           const { x, y } = project(t.lat, t.lng);
           const isSelected = t.id === selectedTruck;
-          const color = statusColor[t.status] || '#64748b';
+          const color = dotColor(t);
+          const gpsIssue = gpsColor(t);
           return (
             <g key={t.id} onClick={() => onSelect(t.id)} style={{ cursor: 'pointer' }}>
               {isSelected && (
                 <circle cx={x} cy={y} r="3" fill="none" stroke="#fbbf24" strokeWidth="0.3" opacity="0.6">
                   <animate attributeName="r" from="2" to="6" dur="2s" repeatCount="indefinite" />
                   <animate attributeName="opacity" from="0.8" to="0" dur="2s" repeatCount="indefinite" />
+                </circle>
+              )}
+              {gpsIssue && (
+                <circle cx={x} cy={y} r="2.5" fill="none" stroke={gpsIssue} strokeWidth="0.2" opacity="0.5">
+                  <animate attributeName="r" from="2" to="5" dur="1.5s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" from="0.7" to="0" dur="1.5s" repeatCount="indefinite" />
                 </circle>
               )}
               <circle cx={x} cy={y} r={isSelected ? 1.5 : 1} fill={color} stroke="#fff" strokeWidth="0.2" />
@@ -843,6 +950,13 @@ function FleetMap({
       </svg>
       <div className="absolute bottom-2 right-2 text-[9px] text-slate-500 bg-slate-900/80 px-2 py-1 rounded border border-slate-800">
         Aegis Map · TX Region · {trucks.length} trucks
+      </div>
+      <div className="absolute bottom-2 left-2 text-[9px] text-slate-300 bg-slate-900/85 px-2 py-1 rounded border border-slate-800 flex items-center gap-3">
+        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Moving</span>
+        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Idle</span>
+        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-slate-500" /> Offline</span>
+        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-yellow-500" /> Marginal GPS</span>
+        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-rose-500" /> Spoofed</span>
       </div>
       <div className="absolute top-2 left-2 text-[9px] text-slate-500 bg-slate-900/80 px-2 py-1 rounded border border-slate-800 flex items-center gap-2">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
