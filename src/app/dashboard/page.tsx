@@ -90,8 +90,18 @@ export default function AegisDashboard() {
   const [chatLoading, setChatLoading] = useState(false);
   const [role, setRole] = useState<PrivacyRole>('manager');
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  // Client-only UTC clock — initialized empty to avoid SSR hydration mismatch
+  // (server renders one second, client renders the next).
+  const [utcClock, setUtcClock] = useState<string>('--:--:--');
 
   // Fetch fleet data — revalidate every 10s (and on role change)
+  useEffect(() => {
+    const tick = () => setUtcClock(new Date().toUTCString().split(' ')[4] ?? '--:--:--');
+    tick();
+    const iv = setInterval(tick, 1000);
+    return () => clearInterval(iv);
+  }, []);
+
   useEffect(() => {
     const fetchFleet = async () => {
       try {
@@ -169,7 +179,7 @@ export default function AegisDashboard() {
           <div className="flex items-center gap-3 text-xs">
             <div className="hidden lg:flex items-center gap-2 text-slate-400">
               <Globe2 className="w-4 h-4" />
-              <span>UTC {new Date().toUTCString().split(' ')[4]}</span>
+              <span suppressHydrationWarning>UTC {utcClock}</span>
             </div>
             <a
               href="/globe"
