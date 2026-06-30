@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Camera, ExternalLink, RefreshCw, MapPin, X, ChevronLeft, ChevronRight,
-  Search, Globe, Building2, Wifi, WifiOff, Truck,
+  Search, Globe, Building2, Wifi, WifiOff, Truck, Crosshair,
 } from 'lucide-react';
 
 type CamSource = 'public' | 'company';
@@ -26,8 +26,6 @@ type Cam = {
 };
 
 // ── PUBLIC cameras (verified working direct-image feeds) ─────────────
-// All Caltrans District 9 — Eastern Sierra. Confirmed HTTP 200.
-// These are the same feeds from the original EmergencyCCTV.
 const PUBLIC_CAMS: Cam[] = [
   {
     id: 'pub-sr203-mammoth',
@@ -86,9 +84,6 @@ const PUBLIC_CAMS: Cam[] = [
 ];
 
 // ── COMPANY cameras (placeholder until Compass streams are wired) ───
-// These represent the future state: depot cameras + driver-phone live
-// streams from the Compass Android app. For now we show 3 fake entries
-// so the UI demonstrates the concept and users see what to expect.
 const COMPANY_CAMS: Cam[] = [
   {
     id: 'co-yard-austin',
@@ -96,7 +91,7 @@ const COMPANY_CAMS: Cam[] = [
     state: 'Texas', country: 'US',
     description: 'Aegis Yard · Austin Depot (North Gate)',
     lat: 30.2672, lng: -97.7431, direction: 'S',
-    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/sr203mammothmountain/sr203mammothmountain.jpg', // placeholder until depot cameras wired
+    url: 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/sr203mammothmountain/sr203mammothmountain.jpg',
     format: 'IMAGE_STREAM', encoding: 'H.264', directImage: true,
   },
   {
@@ -145,20 +140,99 @@ const SOURCE_META: Record<CamSource, { label: string; color: string; bg: string;
   company: { label: 'Company', color: 'text-amber-300',  bg: 'bg-amber-500/10',  border: 'border-amber-500/30',  icon: <Building2 className="w-2.5 h-2.5" /> },
 };
 
+/**
+ * LiveImage — fetches a JPG image as a blob every `intervalMs`, creates a
+ * fresh object URL each time, and assigns it to the img element. This
+ * bypasses the browser's HTTP cache (which would otherwise return 304
+ * for the same ETag and freeze the image).
+ *
+ * Returns the current object URL + an error flag.
+ */
+function useLiveImage(url: string, intervalMs: number, enabled: boolean) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [err, setErr] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    setErr(false);
+    setSrc(null);
+
+    async function tick() {
+      if (cancelled) return;
+      // Abort any in-flight request before starting a new one
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+      try {
+        const res = await fetch(url, {
+          cache: 'no-store',        // critical: bypass HTTP cache
+          signal: ac.signal,
+          headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        if (cancelled) return;
+        const objectUrl = URL.createObjectURL(blob);
+        setSrc((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return objectUrl;
+        });
+        setLastUpdate(Date.now());
+        setErr(false);
+      } catch (e: any) {
+        if (e?.name === 'AbortError') return;
+        if (!cancelled) setErr(true);
+      }
+    }
+
+    tick();
+    const iv = setInterval(tick, intervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+      abortRef.current?.abort();
+      // Revoke the last object URL on unmount
+      setSrc((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+    };
+  }, [url, intervalMs, enabled]);
+
+  return { src, err, lastUpdate };
+}
+
+/** Drive-by event: a truck got close to a camera. */
+type DriveBy = {
+  id: string;
+  truckId: string;
+  camId: string;
+  camDescription: string;
+  ts: number;
+  distanceKm: number;
+};
+
 export default function EmergencyCCTV({
   selectedTruck = null,
+  onOpenInGlobe,
 }: {
-  /** Optional selected truck — used for distance overlay on each tile. */
+  /** Optional selected truck — used for distance overlay + drive-by detection. */
   selectedTruck?: FleetCoord;
+  /** Optional callback to fly the map to a camera location. */
+  onOpenInGlobe?: (cam: { lat: number; lng: number; description: string }) => void;
 }) {
   // ─── State ──────────────────────────────────────────────────────
-  const [tick, setTick] = useState(0);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [summary, setSummary] = useState<{ total: number; byState: Record<string, number> } | null>(null);
   const [search, setSearch] = useState('');
   const [filterSource, setFilterSource] = useState<'all' | CamSource>('all');
   const [onlineOnly, setOnlineOnly] = useState(false);
   const [activeCamId, setActiveCamId] = useState<string | null>(null);
+  const [driveBys, setDriveBys] = useState<DriveBy[]>([]);
+  const lastNearestRef = useRef<{ truckId: string; camId: string | null } | null>(null);
 
   // ─── Effects ───────────────────────────────────────────────────
   useEffect(() => {
@@ -168,10 +242,31 @@ export default function EmergencyCCTV({
       .catch(() => {});
   }, []);
 
+  // Drive-by detection: whenever the selected truck moves, check if it's
+  // now within 500m of a DIFFERENT camera than the last nearest one.
   useEffect(() => {
-    const iv = setInterval(() => setTick((t) => t + 1), 4000);
-    return () => clearInterval(iv);
-  }, []);
+    if (!selectedTruck) {
+      lastNearestRef.current = null;
+      return;
+    }
+    let nearestId: string | null = null;
+    let nearestDist = Infinity;
+    for (const cam of ALL_CAMS) {
+      const d = haversineKm(selectedTruck, cam);
+      if (d < nearestDist) { nearestDist = d; nearestId = cam.id; }
+    }
+    const last = lastNearestRef.current;
+    if (last && last.truckId === selectedTruck.id && nearestId && nearestId !== last.camId && nearestDist < 0.5) {
+      const cam = ALL_CAMS.find((c) => c.id === nearestId);
+      if (cam) {
+        setDriveBys((prev) => [
+          { id: `${Date.now()}-${selectedTruck.id}-${nearestId}`, truckId: selectedTruck.id, camId: nearestId, camDescription: cam.description, ts: Date.now(), distanceKm: nearestDist },
+          ...prev,
+        ].slice(0, 5));
+      }
+    }
+    lastNearestRef.current = { truckId: selectedTruck.id, camId: nearestId };
+  }, [selectedTruck?.id, selectedTruck?.lat, selectedTruck?.lng]);
 
   // ─── Filter + sort ─────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -185,7 +280,6 @@ export default function EmergencyCCTV({
       }
       return true;
     }).sort((a, b) => {
-      // Sort by distance to selected truck if available
       if (selectedTruck) {
         const da = haversineKm(selectedTruck, a);
         const db = haversineKm(selectedTruck, b);
@@ -201,16 +295,15 @@ export default function EmergencyCCTV({
   const activeCamIndex = activeCam ? filtered.indexOf(activeCam) : -1;
 
   // ─── Modal navigation ──────────────────────────────────────────
-  function goPrev() {
+  const goPrev = useCallback(() => {
     if (activeCamIndex <= 0) return;
     setActiveCamId(filtered[activeCamIndex - 1].id);
-  }
-  function goNext() {
+  }, [activeCamIndex, filtered]);
+  const goNext = useCallback(() => {
     if (activeCamIndex < 0 || activeCamIndex >= filtered.length - 1) return;
     setActiveCamId(filtered[activeCamIndex + 1].id);
-  }
+  }, [activeCamIndex, filtered]);
 
-  // ESC + arrow keys when modal open
   useEffect(() => {
     if (!activeCam) return;
     const handler = (e: KeyboardEvent) => {
@@ -220,7 +313,7 @@ export default function EmergencyCCTV({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeCam, activeCamIndex, filtered.length]);
+  }, [activeCam, goPrev, goNext]);
 
   // ─── Render ────────────────────────────────────────────────────
   return (
@@ -304,6 +397,26 @@ export default function EmergencyCCTV({
         </div>
       )}
 
+      {/* Drive-by log (when truck is selected) */}
+      {selectedTruck && driveBys.length > 0 && (
+        <div className="mb-2 p-2 rounded border border-amber-500/40 bg-amber-500/10">
+          <div className="flex items-center gap-1.5 text-[9px] text-amber-300 font-bold uppercase tracking-widest mb-1">
+            <Crosshair className="w-2.5 h-2.5" />
+            <span>Drive-by · {selectedTruck.id}</span>
+          </div>
+          <div className="space-y-1">
+            {driveBys.slice(0, 3).map((d) => (
+              <div key={d.id} className="text-[9px] text-amber-200/90 flex items-center justify-between gap-2">
+                <span className="truncate">passed <span className="font-mono">{d.camDescription}</span></span>
+                <span className="text-amber-400/70 font-mono whitespace-nowrap">
+                  {Math.round(d.distanceKm * 1000)}m · {Math.round((Date.now() - d.ts) / 1000)}s ago
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Public section */}
       {publicCams.length > 0 && (
         <div className="mb-3">
@@ -313,7 +426,15 @@ export default function EmergencyCCTV({
             <span className="text-[9px] text-slate-500">({publicCams.length})</span>
           </div>
           <div className="grid grid-cols-2 gap-1.5">
-            {publicCams.map((cam) => renderCamTile(cam, tick, errors, setErrors, selectedTruck, setActiveCamId))}
+            {publicCams.map((cam) => (
+              <CamTile
+                key={cam.id} cam={cam}
+                errors={errors} setErrors={setErrors}
+                selectedTruck={selectedTruck}
+                onOpen={setActiveCamId}
+                intervalMs={4000}
+              />
+            ))}
           </div>
         </div>
       )}
@@ -327,7 +448,15 @@ export default function EmergencyCCTV({
             <span className="text-[9px] text-slate-500">({companyCams.length})</span>
           </div>
           <div className="grid grid-cols-2 gap-1.5">
-            {companyCams.map((cam) => renderCamTile(cam, tick, errors, setErrors, selectedTruck, setActiveCamId))}
+            {companyCams.map((cam) => (
+              <CamTile
+                key={cam.id} cam={cam}
+                errors={errors} setErrors={setErrors}
+                selectedTruck={selectedTruck}
+                onOpen={setActiveCamId}
+                intervalMs={4000}
+              />
+            ))}
           </div>
         </div>
       )}
@@ -345,151 +474,43 @@ export default function EmergencyCCTV({
       {/* ── Modal lightbox ────────────────────────────────────── */}
       <AnimatePresence>
         {activeCam && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[600] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
-            onClick={(e) => { if (e.target === e.currentTarget) setActiveCamId(null); }}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-              className="relative w-full max-w-4xl bg-slate-950 border border-amber-500/30 rounded-lg shadow-2xl overflow-hidden"
-            >
-              {/* Modal header */}
-              <div className="flex items-center justify-between p-3 border-b border-slate-800 bg-slate-900/80">
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <Camera className="w-4 h-4 text-amber-400 flex-shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-sm font-bold text-slate-100 truncate">{activeCam.description}</div>
-                    <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500">
-                      <span className={`px-1.5 py-0.5 rounded ${SOURCE_META[activeCam.source].bg} ${SOURCE_META[activeCam.source].color} border ${SOURCE_META[activeCam.source].border} flex items-center gap-1`}>
-                        {SOURCE_META[activeCam.source].icon}
-                        {SOURCE_META[activeCam.source].label}
-                      </span>
-                      <span>{activeCam.state}{activeCam.country ? `, ${activeCam.country}` : ''}</span>
-                      <span className="font-mono">{activeCam.lat.toFixed(4)}, {activeCam.lng.toFixed(4)}</span>
-                      {activeCam.direction && <span>· {activeCam.direction}-facing</span>}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 flex-shrink-0">
-                  <a
-                    href={activeCam.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-2 py-1 rounded text-[10px] text-slate-400 hover:text-amber-300 border border-slate-700 hover:border-amber-500/40 transition flex items-center gap-1"
-                    title="Open original feed"
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                    <span>Original</span>
-                  </a>
-                  <button
-                    onClick={() => setActiveCamId(null)}
-                    className="p-1 rounded text-slate-500 hover:text-red-400 hover:bg-slate-800 transition"
-                    title="Close (ESC)"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Modal body — big video/image */}
-              <div className="relative bg-black aspect-video">
-                {errors[activeCam.id] ? (
-                  <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
-                    <div className="text-center">
-                      <WifiOff className="w-8 h-8 mx-auto mb-2" />
-                      <div>Camera offline</div>
-                    </div>
-                  </div>
-                ) : activeCam.directImage ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={`${activeCam.url}?_t=${tick}`}
-                    alt={activeCam.description}
-                    className="w-full h-full object-contain"
-                    onError={() => setErrors((e) => ({ ...e, [activeCam.id]: true }))}
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
-                    Format {activeCam.format} not playable inline — <a href={activeCam.url} target="_blank" rel="noopener noreferrer" className="text-amber-400 ml-1">open original</a>
-                  </div>
-                )}
-
-                {/* Live indicator */}
-                <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/70 border border-emerald-500/40 text-[9px] text-emerald-300 font-mono">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  LIVE · 4s refresh
-                </div>
-
-                {/* Prev/next arrows */}
-                {activeCamIndex > 0 && (
-                  <button
-                    onClick={goPrev}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 hover:bg-black/90 border border-slate-700 text-slate-200 transition"
-                    title="Previous (←)"
-                  >
-                    <ChevronLeft className="w-5 h-5" />
-                  </button>
-                )}
-                {activeCamIndex >= 0 && activeCamIndex < filtered.length - 1 && (
-                  <button
-                    onClick={goNext}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 hover:bg-black/90 border border-slate-700 text-slate-200 transition"
-                    title="Next (→)"
-                  >
-                    <ChevronRight className="w-5 h-5" />
-                  </button>
-                )}
-
-                {/* Position counter */}
-                <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/70 border border-slate-700 text-[9px] text-slate-400 font-mono">
-                  {activeCamIndex + 1} / {filtered.length}
-                </div>
-              </div>
-
-              {/* Modal footer — distance to selected truck */}
-              {selectedTruck && (
-                <div className="p-3 border-t border-slate-800 bg-slate-900/50 text-[10px] text-slate-300 flex items-center gap-2">
-                  <Truck className="w-3 h-3 text-amber-400" />
-                  <span>
-                    <span className="text-amber-300 font-mono">{selectedTruck.id}</span> is{' '}
-                    <span className="font-bold text-slate-100">
-                      {formatDistance(haversineKm(selectedTruck, activeCam))}
-                    </span>{' '}
-                    from this camera
-                  </span>
-                </div>
-              )}
-            </motion.div>
-          </motion.div>
+          <CamModal
+            cam={activeCam}
+            filtered={filtered}
+            index={activeCamIndex}
+            onClose={() => setActiveCamId(null)}
+            onPrev={goPrev}
+            onNext={goNext}
+            selectedTruck={selectedTruck}
+            onOpenInGlobe={onOpenInGlobe}
+            intervalMs={3000}
+          />
         )}
       </AnimatePresence>
     </div>
   );
 }
 
-// ─── Tile renderer (extracted for re-use in both sections) ──────────
-function renderCamTile(
-  cam: Cam,
-  tick: number,
-  errors: Record<string, boolean>,
-  setErrors: (fn: (prev: Record<string, boolean>) => Record<string, boolean>) => void,
-  selectedTruck: FleetCoord,
-  setActiveCamId: (id: string) => void,
-) {
-  const src = cam.directImage ? `${cam.url}?_t=${tick}` : cam.url;
-  const isErr = errors[cam.id];
+// ─── CamTile — individual camera thumbnail ────────────────────────────
+function CamTile({
+  cam, errors, setErrors, selectedTruck, onOpen, intervalMs,
+}: {
+  cam: Cam;
+  errors: Record<string, boolean>;
+  setErrors: (fn: (prev: Record<string, boolean>) => Record<string, boolean>) => void;
+  selectedTruck: FleetCoord;
+  onOpen: (id: string) => void;
+  intervalMs: number;
+}) {
+  const { src, err, lastUpdate } = useLiveImage(cam.url, intervalMs, cam.directImage);
+  const isErr = err || errors[cam.id];
   const meta = SOURCE_META[cam.source];
   const distKm = selectedTruck ? haversineKm(selectedTruck, cam) : null;
+  const secondsSinceUpdate = lastUpdate ? Math.round((Date.now() - lastUpdate) / 1000) : null;
+
   return (
     <button
-      key={cam.id}
-      onClick={() => setActiveCamId(cam.id)}
+      onClick={() => onOpen(cam.id)}
       className={`group relative block rounded overflow-hidden border bg-slate-950 transition text-left ${
         selectedTruck && distKm !== null && distKm < 50
           ? 'border-amber-500/50 shadow-[0_0_12px_rgba(251,191,36,0.15)]'
@@ -501,7 +522,7 @@ function renderCamTile(
           <div className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-500">
             <WifiOff className="w-3 h-3 mr-1" /> offline
           </div>
-        ) : cam.directImage ? (
+        ) : src ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={src}
@@ -511,25 +532,33 @@ function renderCamTile(
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-[9px] text-slate-500">
-            {cam.format} — click to open
+            <RefreshCw className="w-3 h-3 mr-1 animate-spin" /> loading
           </div>
         )}
 
-        {/* Source badge (top-left) */}
+        {/* Source badge */}
         <div className={`absolute top-1 left-1 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/70 border ${meta.border} text-[8px] font-mono ${meta.color}`}>
           {meta.icon}
           <span className="uppercase tracking-widest font-bold">{meta.label}</span>
         </div>
 
-        {/* State badge (top-right) */}
+        {/* State badge */}
         <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded bg-black/70 border border-slate-700 text-[8px] font-mono text-slate-300">
           {cam.state.slice(0, 2).toUpperCase()}
         </div>
 
-        {/* Distance badge (bottom-right, only if truck selected + close) */}
+        {/* Distance badge (when close to a selected truck) */}
         {distKm !== null && distKm < 100 && (
           <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-amber-500/90 text-[8px] font-mono text-slate-900 font-bold">
             {formatDistance(distKm)} {selectedTruck?.id}
+          </div>
+        )}
+
+        {/* "Live" badge — flickers each refresh */}
+        {lastUpdate && !isErr && (
+          <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/70 border border-emerald-500/40 text-[8px] font-mono text-emerald-300 flex items-center gap-1">
+            <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+            <span>{secondsSinceUpdate !== null ? `${secondsSinceUpdate}s` : 'live'}</span>
           </div>
         )}
       </div>
@@ -543,5 +572,167 @@ function renderCamTile(
         </div>
       </div>
     </button>
+  );
+}
+
+// ─── CamModal — full-screen lightbox ──────────────────────────────────
+function CamModal({
+  cam, filtered, index, onClose, onPrev, onNext, selectedTruck, onOpenInGlobe, intervalMs,
+}: {
+  cam: Cam;
+  filtered: Cam[];
+  index: number;
+  onClose: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+  selectedTruck: FleetCoord;
+  onOpenInGlobe?: (cam: { lat: number; lng: number; description: string }) => void;
+  intervalMs: number;
+}) {
+  const { src, err, lastUpdate } = useLiveImage(cam.url, intervalMs, cam.directImage);
+  const isErr = err;
+  const meta = SOURCE_META[cam.source];
+  const distKm = selectedTruck ? haversineKm(selectedTruck, cam) : null;
+  const secondsSinceUpdate = lastUpdate ? Math.round((Date.now() - lastUpdate) / 1000) : null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[600] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+        className="relative w-full max-w-4xl bg-slate-950 border border-amber-500/30 rounded-lg shadow-2xl overflow-hidden"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-3 border-b border-slate-800 bg-slate-900/80">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <Camera className="w-4 h-4 text-amber-400 flex-shrink-0" />
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-slate-100 truncate">{cam.description}</div>
+              <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500 flex-wrap">
+                <span className={`px-1.5 py-0.5 rounded ${meta.bg} ${meta.color} border ${meta.border} flex items-center gap-1`}>
+                  {meta.icon}
+                  {meta.label}
+                </span>
+                <span>{cam.state}{cam.country ? `, ${cam.country}` : ''}</span>
+                <span className="font-mono">{cam.lat.toFixed(4)}, {cam.lng.toFixed(4)}</span>
+                {cam.direction && <span>· {cam.direction}-facing</span>}
+                {secondsSinceUpdate !== null && !isErr && (
+                  <span className="text-emerald-400 font-mono">· updated {secondsSinceUpdate}s ago</span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {onOpenInGlobe && (
+              <button
+                onClick={() => { onOpenInGlobe({ lat: cam.lat, lng: cam.lng, description: cam.description }); onClose(); }}
+                className="px-2 py-1 rounded text-[10px] text-slate-300 hover:text-amber-300 border border-slate-700 hover:border-amber-500/40 transition flex items-center gap-1"
+                title="Fly the map to this camera"
+              >
+                <Crosshair className="w-3 h-3" />
+                <span>Globe</span>
+              </button>
+            )}
+            <a
+              href={cam.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2 py-1 rounded text-[10px] text-slate-400 hover:text-amber-300 border border-slate-700 hover:border-amber-500/40 transition flex items-center gap-1"
+              title="Open original feed"
+            >
+              <ExternalLink className="w-3 h-3" />
+              <span>Original</span>
+            </a>
+            <button
+              onClick={onClose}
+              className="p-1 rounded text-slate-500 hover:text-red-400 hover:bg-slate-800 transition"
+              title="Close (ESC)"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="relative bg-black aspect-video">
+          {isErr ? (
+            <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
+              <div className="text-center">
+                <WifiOff className="w-8 h-8 mx-auto mb-2" />
+                <div>Camera offline</div>
+              </div>
+            </div>
+          ) : src ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={src}
+              alt={cam.description}
+              className="w-full h-full object-contain"
+              onError={() => {}}
+            />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
+              <RefreshCw className="w-5 h-5 mr-2 animate-spin" /> loading…
+            </div>
+          )}
+
+          {/* Live indicator — green pulse + seconds since update */}
+          {!isErr && (
+            <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/70 border border-emerald-500/40 text-[9px] text-emerald-300 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              LIVE · {intervalMs / 1000}s refresh
+              {secondsSinceUpdate !== null && <span className="opacity-70">· {secondsSinceUpdate}s</span>}
+            </div>
+          )}
+
+          {/* Prev/next */}
+          {index > 0 && (
+            <button
+              onClick={onPrev}
+              className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 hover:bg-black/90 border border-slate-700 text-slate-200 transition"
+              title="Previous (←)"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+          )}
+          {index >= 0 && index < filtered.length - 1 && (
+            <button
+              onClick={onNext}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 hover:bg-black/90 border border-slate-700 text-slate-200 transition"
+              title="Next (→)"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          )}
+
+          {/* Position counter */}
+          <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/70 border border-slate-700 text-[9px] text-slate-400 font-mono">
+            {index + 1} / {filtered.length}
+          </div>
+        </div>
+
+        {/* Footer */}
+        {selectedTruck && (
+          <div className="p-3 border-t border-slate-800 bg-slate-900/50 text-[10px] text-slate-300 flex items-center gap-2">
+            <Truck className="w-3 h-3 text-amber-400" />
+            <span>
+              <span className="text-amber-300 font-mono">{selectedTruck.id}</span> is{' '}
+              <span className="font-bold text-slate-100">
+                {distKm !== null ? formatDistance(distKm) : '—'}
+              </span>{' '}
+              from this camera
+            </span>
+          </div>
+        )}
+      </motion.div>
+    </motion.div>
   );
 }

@@ -36,6 +36,7 @@ const TABS: Array<{ key: Tab; label: string; icon: React.ReactNode; color: strin
 export default function IntelPanel({
   fleetContent,
   selectedTruckCoord = null,
+  onOpenCamInGlobe,
   defaultTab = 'fleet',
 }: {
   /** Pre-rendered fleet list (lives in the page) — we just slot it in. */
@@ -43,6 +44,8 @@ export default function IntelPanel({
   /** Optional coord of the currently selected truck — used by the CCTV tab
    *  to show distance from each camera and sort by proximity. */
   selectedTruckCoord?: { id: string; lat: number; lng: number } | null;
+  /** Optional callback to fly the globe map to a camera location. */
+  onOpenCamInGlobe?: (cam: { lat: number; lng: number; description: string }) => void;
   defaultTab?: Tab;
 }) {
   const [active, setActive] = useState<Tab>(defaultTab);
@@ -140,7 +143,12 @@ export default function IntelPanel({
             transition={{ duration: 0.18 }}
           >
             {active === 'fleet' && fleetContent}
-            {active === 'cctv' && <EmergencyCCTV selectedTruck={selectedTruckCoord} />}
+            {active === 'cctv' && (
+              <EmergencyCCTV
+                selectedTruck={selectedTruckCoord}
+                onOpenInGlobe={onOpenCamInGlobe}
+              />
+            )}
             {active === 'maritime' && <MaritimeOverview />}
             {active === 'global' && <GlobalIncidents />}
             {active === 'sa' && <SATruckingNews />}

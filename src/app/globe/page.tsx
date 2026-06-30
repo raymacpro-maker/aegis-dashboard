@@ -301,6 +301,7 @@ export default function AegisGlobePage() {
                 ? { id: selectedTruck.id, lat: selectedTruck.lat, lng: selectedTruck.lng }
                 : null
             }
+            onOpenCamInGlobe={(cam) => setFlyToLocation({ lat: cam.lat, lng: cam.lng, zoom: 14, ts: Date.now() })}
             defaultTab="fleet"
           />
 
