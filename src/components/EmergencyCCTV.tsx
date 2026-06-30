@@ -32,6 +32,11 @@ type Cam = {
   refreshMin?: number;
 };
 
+// Maximum number of public cams to render in the side panel at once.
+// Rendering 3,000+ tiles would spawn thousands of useLiveImage/useHlsStream
+// hooks, freezing the browser. Users can paginate to see more.
+const PUBLIC_CAM_RENDER_LIMIT = 60;
+
 // ── COMPANY cameras (placeholder until Compass streams are wired) ───
 const COMPANY_CAMS: Cam[] = [
   {
@@ -287,6 +292,37 @@ function useHlsStream(url: string, enabled: boolean) {
   return { videoRef, err };
 }
 
+/**
+ * useInView — IntersectionObserver hook. Returns true once the element
+ * has entered the viewport. Used to lazy-mount expensive hooks
+ * (useLiveImage, useHlsStream) so we don't spawn thousands of hls.js
+ * instances for tiles the user can't see.
+ */
+function useInView<T extends HTMLElement>(rootMargin = "200px") {
+  const ref = useRef<T | null>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setInView(true);
+      return;
+    }
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setInView(true);
+          obs.disconnect(); // one-shot: once visible, stay mounted
+        }
+      },
+      { rootMargin, threshold: 0.01 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [rootMargin]);
+  return [ref, inView] as const;
+}
+
 
 /** Drive-by event: a truck got close to a camera. */
 type DriveBy = {
@@ -439,7 +475,14 @@ export default function EmergencyCCTV({
     });
   }, [search, filterSource, onlineOnly, liveOnly, errors, selectedTruck]);
 
+  const [showAllPublic, setShowAllPublic] = useState(false);
   const publicCamsFiltered = filtered.filter((c) => c.source === 'public');
+  // Cap rendering to PUBLIC_CAM_RENDER_LIMIT unless the user opts in via "Show all".
+  // This prevents 3,000+ tiles from spawning thousands of useLiveImage/useHlsStream
+  // hooks and freezing the browser.
+  const publicCamsRendered = showAllPublic
+    ? publicCamsFiltered
+    : publicCamsFiltered.slice(0, PUBLIC_CAM_RENDER_LIMIT);
   const companyCamsFiltered = filtered.filter((c) => c.source === 'company');
   const activeCam = activeCamId ? allCams.find((c) => c.id === activeCamId) : null;
   const activeCamIndex = activeCam ? filtered.indexOf(activeCam) : -1;
@@ -516,7 +559,7 @@ export default function EmergencyCCTV({
         <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" />
         <input
           type="text"
-          placeholder="Search cameras, roads, cities..."
+          placeholder="Search 3,304 cams by name, route, or district…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full pl-7 pr-2 py-1.5 text-[11px] bg-slate-950/60 border border-slate-800 rounded text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
@@ -616,10 +659,29 @@ export default function EmergencyCCTV({
           <div className="flex items-center gap-1.5 mb-1.5">
             <Globe className="w-3 h-3 text-cyan-400" />
             <span className="text-[9px] uppercase tracking-widest font-bold text-cyan-300">Public · Caltrans</span>
-            <span className="text-[9px] text-slate-500">({publicCamsFiltered.length})</span>
+            <span className="text-[9px] text-slate-500">
+              (showing {publicCamsRendered.length} of {publicCamsFiltered.length})
+            </span>
+            {!showAllPublic && publicCamsFiltered.length > PUBLIC_CAM_RENDER_LIMIT && (
+              <button
+                onClick={() => setShowAllPublic(true)}
+                className="ml-auto px-1.5 py-0.5 rounded text-[8px] uppercase tracking-widest font-bold border border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
+                title={`Render all ${publicCamsFiltered.length.toLocaleString()} tiles (slow)`}
+              >
+                show all ⚠
+              </button>
+            )}
+            {showAllPublic && publicCamsFiltered.length > PUBLIC_CAM_RENDER_LIMIT && (
+              <button
+                onClick={() => setShowAllPublic(false)}
+                className="ml-auto px-1.5 py-0.5 rounded text-[8px] uppercase tracking-widest font-bold border border-slate-700 text-slate-300 hover:bg-slate-800"
+              >
+                collapse
+              </button>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-1.5">
-            {publicCamsFiltered.map((cam) => (
+            {publicCamsRendered.map((cam) => (
               <CamTile
                 key={cam.id} cam={cam}
                 errors={errors} setErrors={setErrors}
@@ -695,8 +757,18 @@ function CamTile({
   onOpen: (id: string) => void;
   intervalMs: number;
 }) {
-  const { src, err, stale, lastUpdate } = useLiveImage(cam.url, intervalMs, cam.directImage);
-  const { videoRef, err: hlsErr } = useHlsStream(cam.url, cam.format === 'M3U8' && cam.directImage === false);
+  // Lazy-mount: only run live hooks once the tile is in viewport.
+  // This is what prevents 3,000 tiles from spawning 3,000 hls.js instances.
+  const [tileRef, inView] = useInView<HTMLButtonElement>("300px");
+  const { src, err, stale, lastUpdate } = useLiveImage(
+    inView ? cam.url : "",
+    inView ? intervalMs : 0,
+    inView && cam.directImage
+  );
+  const { videoRef, err: hlsErr } = useHlsStream(
+    inView ? cam.url : "",
+    inView && cam.format === 'M3U8' && cam.directImage === false
+  );
   const isErr = err || errors[cam.id] || hlsErr;
   const isStale = stale && !isErr;
   const meta = SOURCE_META[cam.source];
@@ -705,6 +777,7 @@ function CamTile({
 
   return (
     <button
+      ref={tileRef}
       onClick={() => onOpen(cam.id)}
       className={`group relative block rounded overflow-hidden border bg-slate-950 transition text-left ${
         selectedTruck && distKm !== null && distKm < 50
@@ -713,7 +786,11 @@ function CamTile({
       }`}
     >
       <div className="relative aspect-video bg-slate-950 overflow-hidden">
-        {isErr ? (
+        {!inView ? (
+          <div className="absolute inset-0 flex items-center justify-center text-[9px] text-slate-600">
+            <Camera className="w-3 h-3" />
+          </div>
+        ) : isErr ? (
           <div className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-500">
             <WifiOff className="w-3 h-3 mr-1" /> offline
           </div>
