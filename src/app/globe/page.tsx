@@ -5,9 +5,7 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import AegisLogo from '@/components/AegisLogo';
-import EmergencyCCTV from '@/components/EmergencyCCTV';
-import MaritimeOverview from '@/components/MaritimeOverview';
-import GlobalIncidents from '@/components/GlobalIncidents';
+import IntelPanel from '@/components/IntelPanel';
 import { ArrowLeft, Globe2, Truck, Shield, RefreshCw, AlertTriangle, Camera, Flame, Ship, Plane } from 'lucide-react';
 
 // OSIRIS-provided components reused
@@ -287,17 +285,19 @@ export default function AegisGlobePage() {
             flyToLocation={flyToLocation}
           />
 
-          {/* Aegis fleet overlay — a fixed canvas-overlay panel showing our 5 trucks */}
-          <FleetOverlayPanel
-            fleet={fleet}
-            summary={fleetSummary}
-            selectedId={selectedTruck?.id ?? null}
-            onSelect={focusTruck}
-            onDrillToDashboard={(t) => router.push(`/dashboard?truck=${encodeURIComponent(t.id)}`)}
+          {/* Tabbed right-rail: Fleet | CCTV | Maritime | Global. Collapsible to icon strip. */}
+          <IntelPanel
+            fleetContent={
+              <FleetOverlayPanel
+                fleet={fleet}
+                summary={fleetSummary}
+                selectedId={selectedTruck?.id ?? null}
+                onSelect={focusTruck}
+                onDrillToDashboard={(t) => router.push(`/dashboard?truck=${encodeURIComponent(t.id)}`)}
+              />
+            }
+            defaultTab="fleet"
           />
-
-          {/* Intel sidebar — live traffic + maritime + global incidents (below fleet panel) */}
-          <IntelSidebar />
 
           {/* OSIRIS LayerPanel — positioned by itself (it uses fixed/absolute itself) */}
           <LayerPanel
@@ -346,7 +346,7 @@ function FleetOverlayPanel({
   onDrillToDashboard: (t: TruckPin) => void;
 }) {
   return (
-    <div className="absolute top-4 right-4 w-72 z-10 max-h-[calc(100vh-120px)] overflow-y-auto bg-[#0a0e1a]/92 border border-amber-500/30 rounded-lg p-4 backdrop-blur-md">
+    <div>
       <div className="flex items-center gap-2 mb-3">
         <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
         <h3 className="text-[10px] uppercase tracking-[0.25em] text-amber-400 font-bold">
@@ -439,22 +439,5 @@ function SmallStat({ label, n, color }: { label: string; n: number; color: strin
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Aegis Intel sidebar — live traffic + maritime + global incidents.
-// Renders to the right of the globe, below the FleetOverlayPanel.
+// Aegis Intel sidebar — replaced by IntelPanel (tabbed right-rail).
 // ─────────────────────────────────────────────────────────────────────────────
-
-function IntelSidebar() {
-  return (
-    <div className="absolute top-[420px] right-4 w-72 z-10 max-h-[calc(100vh-440px)] overflow-y-auto space-y-2 pr-1">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-        <h3 className="text-[10px] uppercase tracking-[0.25em] text-cyan-300 font-bold">
-          Aegis · Intel
-        </h3>
-      </div>
-      <EmergencyCCTV />
-      <MaritimeOverview />
-      <GlobalIncidents />
-    </div>
-  );
-}
