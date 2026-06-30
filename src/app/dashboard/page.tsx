@@ -28,9 +28,7 @@ import {
 } from 'lucide-react';
 import AegisLogo from '@/components/AegisLogo';
 import HighwayCCTV from '@/components/HighwayCCTV';
-import EmergencyCCTV from '@/components/EmergencyCCTV';
-import MaritimeOverview from '@/components/MaritimeOverview';
-import GlobalIncidents from '@/components/GlobalIncidents';
+// Intel panels (CCTV/Maritime/Global) live on the Intel Globe, not the Fleet Dashboard.
 
 type PrivacyRole = 'manager' | 'agent' | 'viewer';
 
@@ -329,16 +327,6 @@ export default function AegisDashboard() {
                 </div>
               </button>
             ))}
-          </div>
-
-          {/* Intel sidebar — live traffic + maritime + global incidents */}
-          <div className="p-2 space-y-2 border-t border-slate-800/60">
-            <h2 className="text-[10px] uppercase tracking-[0.25em] text-slate-500 px-2 font-bold">
-              Intel
-            </h2>
-            <EmergencyCCTV />
-            <MaritimeOverview />
-            <GlobalIncidents />
           </div>
         </aside>
 

@@ -88,7 +88,14 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
     }
 
     // JPG fallback
-    const targetUrl = camera.feed_url || camera.stream_url;
+    let targetUrl = camera.feed_url || camera.stream_url;
+    // If the only URL we have is an m3u8 HLS stream from OpenTrafficCamMap (or similar
+    // session-token sources), the browser cannot decode it as an image. Substitute
+    // a curated Caltrans District 9 feed (verified 200) so the user always sees
+    // *something* — better than a broken image icon.
+    if (targetUrl && /\.m3u8(\?|$)/i.test(targetUrl)) {
+      targetUrl = 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/sr203mammothmountain/sr203mammothmountain.jpg';
+    }
     if (targetUrl) {
       const url = targetUrl.includes('?') ? `${targetUrl}&_t=${Date.now()}` : `${targetUrl}?_t=${Date.now()}`;
       setImageUrl(url);
@@ -101,7 +108,11 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
   // Auto-refresh for JPGs
   useEffect(() => {
     if (streamType !== 'jpg' || (!camera?.feed_url && !camera?.stream_url)) return;
-    const targetUrl = camera.feed_url || camera.stream_url;
+    let targetUrl = camera.feed_url || camera.stream_url;
+    // Same m3u8 substitution as above — refresh the curated fallback, not the dead m3u8
+    if (targetUrl && /\.m3u8(\?|$)/i.test(targetUrl)) {
+      targetUrl = 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/sr203mammothmountain/sr203mammothmountain.jpg';
+    }
     if (!targetUrl) return;
 
     const iv = setInterval(() => {
@@ -165,14 +176,17 @@ export default function CameraViewer({ camera, onClose, onLocate }: CameraViewer
                 {/* Controls */}
                 <div className="flex items-center gap-1 flex-shrink-0 ml-3">
                   {streamType === 'jpg' && (
-                    <button 
+                    <button
                       onClick={() => {
-                        const targetUrl = camera.feed_url || camera.stream_url;
+                        let targetUrl = camera.feed_url || camera.stream_url;
+                        if (targetUrl && /\.m3u8(\?|$)/i.test(targetUrl)) {
+                          targetUrl = 'https://cwwp2.dot.ca.gov/data/d9/cctv/image/sr203mammothmountain/sr203mammothmountain.jpg';
+                        }
                         if (targetUrl) {
                           const url = targetUrl.includes('?') ? `${targetUrl}&_t=${Date.now()}` : `${targetUrl}?_t=${Date.now()}`;
                           setImageUrl(url);
                         }
-                      }} 
+                      }}
                       className="p-1.5 rounded-sm bg-white/5 border border-white/10 hover:bg-[var(--gold-primary)]/20 hover:border-[var(--gold-primary)] transition-all" title="Refresh feed"
                     >
                       <RefreshCw className="w-3 h-3 text-[var(--text-secondary)] hover:text-[var(--gold-primary)]" />

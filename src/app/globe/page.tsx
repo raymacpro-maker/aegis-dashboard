@@ -5,6 +5,9 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import AegisLogo from '@/components/AegisLogo';
+import EmergencyCCTV from '@/components/EmergencyCCTV';
+import MaritimeOverview from '@/components/MaritimeOverview';
+import GlobalIncidents from '@/components/GlobalIncidents';
 import { ArrowLeft, Globe2, Truck, Shield, RefreshCw, AlertTriangle, Camera, Flame, Ship, Plane } from 'lucide-react';
 
 // OSIRIS-provided components reused
@@ -188,9 +191,16 @@ export default function AegisGlobePage() {
   }, [data, fleet]);
 
   // Click on CCTV point in OSIRIS map → open CameraViewer (OSIRIS component)
+  // OSIRIS sends the camera as flat {type:'cctv', id, name, lat, lng, feed_url, ...}
+  // Some other layers send {type, data: {...}}. Handle both.
   const handleEntityClick = useCallback((entity: any) => {
-    if (entity?.type === 'cctv' && entity.data) {
-      setActiveCamera(entity.data);
+    if (!entity) return;
+    if (entity.type === 'cctv') {
+      const cam = entity.data ?? entity;
+      // Sanity: must have at least a name or id
+      if (cam && (cam.id || cam.name)) {
+        setActiveCamera(cam);
+      }
     }
   }, []);
 
@@ -285,6 +295,9 @@ export default function AegisGlobePage() {
             onSelect={focusTruck}
             onDrillToDashboard={(t) => router.push(`/dashboard?truck=${encodeURIComponent(t.id)}`)}
           />
+
+          {/* Intel sidebar — live traffic + maritime + global incidents (below fleet panel) */}
+          <IntelSidebar />
 
           {/* OSIRIS LayerPanel — positioned by itself (it uses fixed/absolute itself) */}
           <LayerPanel
@@ -421,6 +434,27 @@ function SmallStat({ label, n, color }: { label: string; n: number; color: strin
       <div className="font-bold text-base font-mono" style={{ color }}>
         {n}
       </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aegis Intel sidebar — live traffic + maritime + global incidents.
+// Renders to the right of the globe, below the FleetOverlayPanel.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function IntelSidebar() {
+  return (
+    <div className="absolute top-[420px] right-4 w-72 z-10 max-h-[calc(100vh-440px)] overflow-y-auto space-y-2 pr-1">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+        <h3 className="text-[10px] uppercase tracking-[0.25em] text-cyan-300 font-bold">
+          Aegis · Intel
+        </h3>
+      </div>
+      <EmergencyCCTV />
+      <MaritimeOverview />
+      <GlobalIncidents />
     </div>
   );
 }
