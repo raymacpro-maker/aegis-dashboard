@@ -878,7 +878,18 @@ function FleetMap({
   selectedTruck,
   onSelect,
 }: {
-  trucks: Array<{ id: string; lat: number; lng: number; status: string; address: string }>;
+  trucks: Array<{
+    id: string;
+    lat: number;
+    lng: number;
+    status: string;
+    address: string;
+    accuracyM?: number;
+    cn0AvgDbhz?: number;
+    satellitesUsed?: number;
+    spoofingSuspected?: boolean;
+    fixSource?: 'phone_gps' | 'fmc003' | 'fused';
+  }>;
   selectedTruck: string;
   onSelect: (id: string) => void;
 }) {
@@ -898,14 +909,14 @@ function FleetMap({
 
   // GPS quality overrides status when accuracy is degraded or spoofing is suspected.
   // This is the Aegis wedge — Samsara/Motive/Geotab never see this signal.
-  const gpsColor = (t: Truck): string | null => {
-    const loc = t.location;
-    if (loc.spoofingSuspected) return '#dc2626'; // red — direct spoofing
-    if (typeof loc.cn0AvgDbhz === 'number' && loc.cn0AvgDbhz < 20) return '#f43f5e'; // rose — degraded GNSS
-    if (typeof loc.accuracyM === 'number' && loc.accuracyM > 30) return '#eab308'; // yellow — marginal accuracy
+  const gpsColor = (t: { accuracyM?: number; cn0AvgDbhz?: number; spoofingSuspected?: boolean }): string | null => {
+    if (t.spoofingSuspected) return '#dc2626'; // red — direct spoofing
+    if (typeof t.cn0AvgDbhz === 'number' && t.cn0AvgDbhz < 20) return '#f43f5e'; // rose — degraded GNSS
+    if (typeof t.accuracyM === 'number' && t.accuracyM > 30) return '#eab308'; // yellow — marginal accuracy
     return null;
   };
-  const dotColor = (t: Truck) => gpsColor(t) ?? statusColor[t.status] ?? '#64748b';
+  const dotColor = (t: { status: string; accuracyM?: number; cn0AvgDbhz?: number; spoofingSuspected?: boolean }) =>
+    gpsColor(t) ?? statusColor[t.status] ?? '#64748b';
 
   return (
     <div className="w-full h-full relative">
