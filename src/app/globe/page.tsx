@@ -285,7 +285,7 @@ export default function AegisGlobePage() {
             flyToLocation={flyToLocation}
           />
 
-          {/* Tabbed right-rail: Fleet | CCTV | Maritime | Global. Collapsible to icon strip. */}
+          {/* Tabbed right-rail: Fleet | CCTV | Maritime | Global | SA. Collapsible to icon strip. */}
           <IntelPanel
             fleetContent={
               <FleetOverlayPanel
@@ -295,6 +295,11 @@ export default function AegisGlobePage() {
                 onSelect={focusTruck}
                 onDrillToDashboard={(t) => router.push(`/dashboard?truck=${encodeURIComponent(t.id)}`)}
               />
+            }
+            selectedTruckCoord={
+              selectedTruck
+                ? { id: selectedTruck.id, lat: selectedTruck.lat, lng: selectedTruck.lng }
+                : null
             }
             defaultTab="fleet"
           />
