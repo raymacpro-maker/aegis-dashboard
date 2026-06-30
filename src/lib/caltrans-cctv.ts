@@ -125,27 +125,45 @@ function normalize(cctv: z.infer<typeof CaltransCctvSchema>['cctv'], district: n
 async function fetchDistrict(district: number, signal: AbortSignal): Promise<CaltransCam[]> {
   const dd = String(district).padStart(2, '0');
   const url = CALTTRANS_BASE.replace('{D}', String(district)).replace('{DD}', dd).replace('{ext}', 'json');
-  const res = await fetch(url, {
-    cache: 'no-store',
-    signal,
-    headers: { 'User-Agent': 'Mozilla/5.0 (Aegis-Fleet-Dashboard)', 'Accept': 'application/json' },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const text = await res.text();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (e) {
-    // JSON parse error — fall back to XML
-    return await fetchDistrictXml(district, signal);
+  // Retry up to 3 times on 5xx errors (Caltrans CDN has intermittent 500s).
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(url, {
+        cache: 'no-store',
+        signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Aegis-Fleet-Dashboard)', 'Accept': 'application/json' },
+      });
+      if (res.status >= 500) {
+        lastErr = new Error(`HTTP ${res.status}`);
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1) * (attempt + 1)));
+        continue;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch (e) {
+        return await fetchDistrictXml(district, signal);
+      }
+      const validated = CaltransFeedSchema.safeParse(parsed);
+      if (!validated.success) {
+        throw new Error(`Schema validation failed: ${validated.error.issues[0]?.message}`);
+      }
+      return validated.data.data
+        .map((d) => normalize(d.cctv, district))
+        .filter((c): c is CaltransCam => c !== null);
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw e;
+      lastErr = e;
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1) * (attempt + 1)));
+        continue;
+      }
+    }
   }
-  const validated = CaltransFeedSchema.safeParse(parsed);
-  if (!validated.success) {
-    throw new Error(`Schema validation failed: ${validated.error.issues[0]?.message}`);
-  }
-  return validated.data.data
-    .map((d) => normalize(d.cctv, district))
-    .filter((c): c is CaltransCam => c !== null);
+  throw lastErr || new Error(`Failed to fetch D${district} after 3 attempts`);
 }
 
 async function fetchDistrictXml(district: number, signal: AbortSignal): Promise<CaltransCam[]> {
