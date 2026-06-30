@@ -3,19 +3,21 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Truck, Camera, Anchor, Newspaper, X, Maximize2, Minimize2,
+  Truck, Camera, Anchor, Newspaper, Radio, Maximize2, Minimize2,
 } from 'lucide-react';
 import EmergencyCCTV from './EmergencyCCTV';
 import MaritimeOverview from './MaritimeOverview';
 import GlobalIncidents from './GlobalIncidents';
+import SATruckingNews from './SATruckingNews';
 
-type Tab = 'fleet' | 'cctv' | 'maritime' | 'global';
+type Tab = 'fleet' | 'cctv' | 'maritime' | 'global' | 'sa';
 
 const TABS: Array<{ key: Tab; label: string; icon: React.ReactNode; color: string }> = [
   { key: 'fleet',   label: 'Fleet',     icon: <Truck className="w-3.5 h-3.5" />,       color: 'text-amber-400' },
   { key: 'cctv',    label: 'CCTV',      icon: <Camera className="w-3.5 h-3.5" />,      color: 'text-cyan-400' },
   { key: 'maritime',label: 'Maritime',  icon: <Anchor className="w-3.5 h-3.5" />,      color: 'text-blue-400' },
   { key: 'global',  label: 'News',      icon: <Newspaper className="w-3.5 h-3.5" />,   color: 'text-emerald-400' },
+  { key: 'sa',      label: 'SA',        icon: <Radio className="w-3.5 h-3.5" />,       color: 'text-rose-400' },
 ];
 
 export default function IntelPanel({
@@ -104,6 +106,7 @@ export default function IntelPanel({
             {active === 'cctv' && <EmergencyCCTV />}
             {active === 'maritime' && <MaritimeOverview />}
             {active === 'global' && <GlobalIncidents />}
+            {active === 'sa' && <SATruckingNews />}
           </motion.div>
         </AnimatePresence>
       </div>
